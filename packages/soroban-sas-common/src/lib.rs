@@ -1,4 +1,6 @@
 #![no_std]
+pub mod errors;
+
 use soroban_sdk::{contracttype, Address, String, Bytes};
 
 #[contracttype]
