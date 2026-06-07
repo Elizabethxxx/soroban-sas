@@ -1,6 +1,7 @@
 #![no_std]
 pub mod errors;
 pub mod validation;
+pub mod signature;
 
 use soroban_sdk::{contracttype, Address, String, Bytes};
 
