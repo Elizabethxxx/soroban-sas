@@ -32,3 +32,6 @@ pub struct Attestation {
     pub revocable: bool,
     pub data: Bytes,
 }
+
+#[cfg(test)]
+mod test;
