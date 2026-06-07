@@ -12,3 +12,10 @@ pub fn validate_schema_syntax(_env: &Env, schema: &String) -> Result<(), SASErro
     }
     Ok(())
 }
+
+pub fn validate_ttl(_env: &Env, current_time: u64, expiration_time: u64) -> Result<(), SASError> {
+    if expiration_time > 0 && current_time >= expiration_time {
+        return Err(SASError::InvalidTTL);
+    }
+    Ok(())
+}
