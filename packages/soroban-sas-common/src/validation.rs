@@ -24,3 +24,10 @@ pub fn validate_recipient(_env: &Env, _recipient: &Address) -> Result<(), SASErr
     // Implement robust recipient address validation logic
     Ok(())
 }
+
+pub fn check_revocable(_env: &Env, schema_revocable: bool, attestation_revocable: bool) -> Result<(), SASError> {
+    if !schema_revocable && attestation_revocable {
+        return Err(SASError::NotRevocable);
+    }
+    Ok(())
+}
