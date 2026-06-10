@@ -1,4 +1,4 @@
-use soroban_sdk::{Env, String};
+use soroban_sdk::{Env, String, Address};
 use crate::errors::SASError;
 
 const MAX_SCHEMA_LENGTH: u32 = 1024;
@@ -17,5 +17,10 @@ pub fn validate_ttl(_env: &Env, current_time: u64, expiration_time: u64) -> Resu
     if expiration_time > 0 && current_time >= expiration_time {
         return Err(SASError::InvalidTTL);
     }
+    Ok(())
+}
+
+pub fn validate_recipient(_env: &Env, _recipient: &Address) -> Result<(), SASError> {
+    // Implement robust recipient address validation logic
     Ok(())
 }
