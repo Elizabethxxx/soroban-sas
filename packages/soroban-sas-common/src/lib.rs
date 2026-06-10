@@ -20,6 +20,7 @@ pub struct SchemaRecord {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[repr(C)] // Optimize storage serialization
 pub struct Attestation {
     pub uid: UID,
     pub schema_uid: UID,
