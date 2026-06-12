@@ -2,6 +2,7 @@
 pub mod errors;
 pub mod validation;
 pub mod signature;
+pub mod events;
 
 use soroban_sdk::{contracttype, Address, String, Bytes};
 
