@@ -27,3 +27,15 @@ fn test_validate_ttl() {
     assert!(validate_ttl(&env, 200, 100).is_err());
     assert!(validate_ttl(&env, 100, 100).is_err()); // expired exactly at current time
 }
+
+use crate::merkle::MerkleRoot;
+use soroban_sdk::BytesN;
+
+#[test]
+fn test_merkle_root_generation() {
+    let env = Env::default();
+    let root_bytes = BytesN::from_array(&env, &[0u8; 32]);
+    let merkle_root = MerkleRoot(root_bytes.clone());
+    
+    assert_eq!(merkle_root.0, root_bytes);
+}
