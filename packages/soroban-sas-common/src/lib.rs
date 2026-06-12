@@ -6,6 +6,12 @@ pub mod events;
 pub mod merkle;
 pub mod macros;
 
+pub use errors::*;
+pub use validation::*;
+pub use signature::*;
+pub use events::*;
+pub use merkle::*;
+
 use soroban_sdk::{contracttype, Address, String, Bytes};
 
 #[contracttype]
