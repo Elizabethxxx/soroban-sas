@@ -4,6 +4,7 @@ pub mod validation;
 pub mod signature;
 pub mod events;
 pub mod merkle;
+pub mod macros;
 
 use soroban_sdk::{contracttype, Address, String, Bytes};
 
