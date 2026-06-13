@@ -1,0 +1,16 @@
+#![no_std]
+
+use soroban_sdk::{contract, contractimpl, symbol_short, Env, Symbol};
+
+#[contract]
+pub struct SchemaRegistry;
+
+pub const REGISTRY_ADMIN: Symbol = symbol_short!("ADMIN");
+pub const SCHEMA_COUNT: Symbol = symbol_short!("COUNT");
+
+#[contractimpl]
+impl SchemaRegistry {
+    pub fn init(_env: Env) {
+        // Initialize basic storage keys for the Schema Registry
+    }
+}
