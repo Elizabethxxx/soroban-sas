@@ -11,8 +11,17 @@ pub const SCHEMA_COUNT: Symbol = symbol_short!("COUNT");
 
 #[contractimpl]
 impl SchemaRegistry {
-    pub fn init(_env: Env) {
-        // Initialize basic storage keys for the Schema Registry
+    pub fn init(env: Env, admin: soroban_sdk::Address) {
+        if env.storage().instance().has(&REGISTRY_ADMIN) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&REGISTRY_ADMIN, &admin);
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
+        let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
+        admin.require_auth();
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
     pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
