@@ -22,6 +22,10 @@ impl SchemaRegistry {
         let hash = env.crypto().sha256(&payload);
         let uid = UID(hash.into());
         
+        if env.storage().persistent().has(&uid) {
+            soroban_sdk::panic_with_error!(&env, soroban_sas_common::SASError::SchemaAlreadyExists);
+        }
+        
         let record = SchemaRecord {
             uid: uid.clone(),
             resolver,
