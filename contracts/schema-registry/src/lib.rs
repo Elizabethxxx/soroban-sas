@@ -34,6 +34,8 @@ impl SchemaRegistry {
         };
         env.storage().persistent().set(&uid, &record);
         
+        env.events().publish((soroban_sas_common::events::REGISTERED,), uid.clone());
+        
         uid
     }
 
