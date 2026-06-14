@@ -15,12 +15,20 @@ impl SchemaRegistry {
         // Initialize basic storage keys for the Schema Registry
     }
 
-    pub fn register(env: Env, schema: String, revocable: bool) -> UID {
+    pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
         let mut payload = Bytes::new(&env);
         payload.append(&schema.clone().into());
         
         let hash = env.crypto().sha256(&payload);
         let uid = UID(hash.into());
+        
+        let record = SchemaRecord {
+            uid: uid.clone(),
+            resolver,
+            revocable,
+            schema,
+        };
+        env.storage().persistent().set(&uid, &record);
         
         uid
     }
