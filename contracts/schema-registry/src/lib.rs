@@ -41,3 +41,6 @@ impl SchemaRegistry {
         env.storage().persistent().get(&uid)
     }
 }
+
+#[cfg(test)]
+mod test;
