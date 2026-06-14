@@ -36,4 +36,8 @@ impl SchemaRegistry {
         
         uid
     }
+
+    pub fn get_schema(env: Env, uid: UID) -> Option<SchemaRecord> {
+        env.storage().persistent().get(&uid)
+    }
 }
