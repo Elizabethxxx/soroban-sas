@@ -38,3 +38,23 @@ fn test_duplicate_schema() {
     // (SASError::SchemaAlreadyExists is #2 assuming it's the second variant)
     client.register(&schema_str, &resolver, &true);
 }
+
+use soroban_sdk::BytesN;
+
+#[test]
+fn test_upgrade() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+    
+    let admin = Address::generate(&env);
+    client.init(&admin);
+    
+    // Simulate upgrade call (we mock the wasm hash)
+    let new_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+    
+    // In tests, environment requires mock auth setup for `admin.require_auth()`
+    env.mock_all_auths();
+    
+    client.upgrade(&new_wasm_hash);
+}
