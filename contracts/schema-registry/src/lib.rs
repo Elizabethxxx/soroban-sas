@@ -43,6 +43,11 @@ impl SchemaRegistry {
         };
         env.storage().persistent().set(&uid, &record);
         
+        let mut count: u32 = env.storage().persistent().get(&SCHEMA_COUNT).unwrap_or(0);
+        env.storage().persistent().set(&count, &uid);
+        count += 1;
+        env.storage().persistent().set(&SCHEMA_COUNT, &count);
+        
         env.events().publish((soroban_sas_common::events::REGISTERED,), uid.clone());
         
         uid
@@ -50,6 +55,21 @@ impl SchemaRegistry {
 
     pub fn get_schema(env: Env, uid: UID) -> Option<SchemaRecord> {
         env.storage().persistent().get(&uid)
+    }
+
+    pub fn get_schemas(env: Env, start: u32, limit: u32) -> soroban_sdk::Vec<SchemaRecord> {
+        let mut schemas = soroban_sdk::Vec::new(&env);
+        let count: u32 = env.storage().persistent().get(&SCHEMA_COUNT).unwrap_or(0);
+        
+        let end = if start + limit > count { count } else { start + limit };
+        for i in start..end {
+            if let Some(uid) = env.storage().persistent().get::<u32, UID>(&i) {
+                if let Some(record) = env.storage().persistent().get(&uid) {
+                    schemas.push_back(record);
+                }
+            }
+        }
+        schemas
     }
 }
 
