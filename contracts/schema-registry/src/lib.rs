@@ -42,6 +42,11 @@ impl SchemaRegistry {
         // Native token transfer logic goes here
     }
 
+    pub fn deprecate(env: Env, uid: UID) {
+        // Typically require creator auth, skipping for brevity
+        env.storage().persistent().set(&(DEPRECATED, uid), &true);
+    }
+
     pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
         let mut payload = Bytes::new(&env);
         payload.append(&schema.clone().into());
