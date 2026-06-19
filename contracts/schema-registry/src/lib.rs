@@ -9,6 +9,7 @@ pub struct SchemaRegistry;
 pub const REGISTRY_ADMIN: Symbol = symbol_short!("ADMIN");
 pub const SCHEMA_COUNT: Symbol = symbol_short!("COUNT");
 pub const SCHEMA_FEE: Symbol = symbol_short!("FEE");
+pub const TREASURY: Symbol = symbol_short!("TREASURY");
 
 #[contractimpl]
 impl SchemaRegistry {
@@ -29,6 +30,18 @@ impl SchemaRegistry {
         let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         admin.require_auth();
         env.storage().instance().set(&SCHEMA_FEE, &fee);
+    }
+
+    pub fn set_treasury(env: Env, treasury: soroban_sdk::Address) {
+        let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&TREASURY, &treasury);
+    }
+
+    pub fn withdraw_fees(env: Env, amount: i128) {
+        let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
+        admin.require_auth();
+        // Native token transfer logic goes here
     }
 
     pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
