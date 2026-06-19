@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused_variables)]
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Env, Symbol, String, Bytes};
 use soroban_sas_common::{SchemaRecord, UID};
