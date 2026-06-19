@@ -95,3 +95,20 @@ fn test_deprecate() {
     // Check it's no longer active
     assert!(client.get_schema(&uid).is_none());
 }
+
+#[test]
+fn test_validate_schema() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+    
+    let schema_str = String::from_str(&env, "bool like_soroban");
+    let resolver = Address::generate(&env);
+    
+    let uid = client.register(&schema_str, &resolver, &true);
+    
+    assert_eq!(client.validate_schema(&uid), true);
+    
+    client.deprecate(&uid);
+    assert_eq!(client.validate_schema(&uid), false);
+}
