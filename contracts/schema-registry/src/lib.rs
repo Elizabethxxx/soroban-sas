@@ -6,10 +6,8 @@ use soroban_sas_common::{SchemaRecord, UID};
 #[contract]
 pub struct SchemaRegistry;
 
-pub const REGISTRY_ADMIN: Symbol = symbol_short!("ADMIN");
-pub const SCHEMA_COUNT: Symbol = symbol_short!("COUNT");
-pub const SCHEMA_FEE: Symbol = symbol_short!("FEE");
-pub const TREASURY: Symbol = symbol_short!("TREASURY");
+mod storage;
+use storage::*;
 
 #[contractimpl]
 impl SchemaRegistry {
