@@ -83,6 +83,13 @@ impl SchemaRegistry {
         env.storage().persistent().get(&uid)
     }
 
+    pub fn validate_schema(env: Env, uid: UID) -> bool {
+        if env.storage().persistent().get(&(DEPRECATED, uid.clone())).unwrap_or(false) {
+            return false;
+        }
+        env.storage().persistent().has(&uid)
+    }
+
     pub fn get_schemas(env: Env, start: u32, limit: u32) -> soroban_sdk::Vec<SchemaRecord> {
         let mut schemas = soroban_sdk::Vec::new(&env);
         let count: u32 = env.storage().persistent().get(&SCHEMA_COUNT).unwrap_or(0);
