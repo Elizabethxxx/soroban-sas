@@ -77,6 +77,9 @@ impl SchemaRegistry {
     }
 
     pub fn get_schema(env: Env, uid: UID) -> Option<SchemaRecord> {
+        if env.storage().persistent().get(&(DEPRECATED, uid.clone())).unwrap_or(false) {
+            return None;
+        }
         env.storage().persistent().get(&uid)
     }
 

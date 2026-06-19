@@ -74,3 +74,24 @@ fn test_fee_and_treasury() {
     client.set_treasury(&treasury);
     client.withdraw_fees(&500);
 }
+
+#[test]
+fn test_deprecate() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+    
+    let schema_str = String::from_str(&env, "bool like_soroban");
+    let resolver = Address::generate(&env);
+    
+    let uid = client.register(&schema_str, &resolver, &true);
+    
+    // Check it's active
+    assert!(client.get_schema(&uid).is_some());
+    
+    // Deprecate
+    client.deprecate(&uid);
+    
+    // Check it's no longer active
+    assert!(client.get_schema(&uid).is_none());
+}
