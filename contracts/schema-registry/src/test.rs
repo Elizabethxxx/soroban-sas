@@ -58,3 +58,19 @@ fn test_upgrade() {
     
     client.upgrade(&new_wasm_hash);
 }
+
+#[test]
+fn test_fee_and_treasury() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+    
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(&admin);
+    
+    env.mock_all_auths();
+    client.set_fee(&1000);
+    client.set_treasury(&treasury);
+    client.withdraw_fees(&500);
+}
