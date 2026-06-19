@@ -8,6 +8,7 @@ pub struct SchemaRegistry;
 
 pub const REGISTRY_ADMIN: Symbol = symbol_short!("ADMIN");
 pub const SCHEMA_COUNT: Symbol = symbol_short!("COUNT");
+pub const SCHEMA_FEE: Symbol = symbol_short!("FEE");
 
 #[contractimpl]
 impl SchemaRegistry {
@@ -22,6 +23,12 @@ impl SchemaRegistry {
         let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         admin.require_auth();
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    pub fn set_fee(env: Env, fee: i128) {
+        let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&SCHEMA_FEE, &fee);
     }
 
     pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
