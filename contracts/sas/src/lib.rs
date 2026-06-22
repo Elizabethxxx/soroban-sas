@@ -32,7 +32,9 @@ impl SAS {
             panic!("Invalid schema");
         }
         
-        // Basic logic for issuance
+        // Store the attestation
+        env.storage().persistent().set(&attestation.uid, &attestation);
+        
         attestation.uid.clone()
     }
 }
