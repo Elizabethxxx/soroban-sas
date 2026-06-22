@@ -20,6 +20,8 @@ impl SAS {
     }
 
     pub fn attest(env: Env, attestation: Attestation) -> UID {
+        attestation.attester.require_auth();
+        
         // Basic logic for issuance
         attestation.uid.clone()
     }
