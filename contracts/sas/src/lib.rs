@@ -22,6 +22,16 @@ impl SAS {
     pub fn attest(env: Env, attestation: Attestation) -> UID {
         attestation.attester.require_auth();
         
+        let registry: Address = env.storage().instance().get(&SCHEMA_REGISTRY).unwrap();
+        let is_valid: bool = env.invoke_contract(
+            &registry,
+            &Symbol::new(&env, "validate_schema"),
+            soroban_sdk::vec![&env, attestation.schema_uid.clone().into_val(&env)]
+        );
+        if !is_valid {
+            panic!("Invalid schema");
+        }
+        
         // Basic logic for issuance
         attestation.uid.clone()
     }
