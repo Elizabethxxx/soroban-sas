@@ -1,6 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
+use soroban_sas_common::{Attestation, UID};
 
 #[contract]
 pub struct SAS;
@@ -16,5 +17,10 @@ impl SAS {
         }
         env.storage().instance().set(&SAS_ADMIN, &admin);
         env.storage().instance().set(&SCHEMA_REGISTRY, &registry);
+    }
+
+    pub fn attest(env: Env, attestation: Attestation) -> UID {
+        // Basic logic for issuance
+        attestation.uid.clone()
     }
 }
