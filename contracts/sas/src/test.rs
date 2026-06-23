@@ -136,3 +136,74 @@ fn test_schema_validation_rejection() {
     env.mock_all_auths();
     sas_client.attest(&attestation);
 }
+
+#[test]
+fn test_revocation_success() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let uid = UID([1u8; 32]);
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    env.mock_all_auths();
+    sas_client.attest(&attestation);
+    
+    // Revoke
+    sas_client.revoke(&uid);
+}
+
+#[test]
+#[should_panic(expected = "Attestation is not revocable")]
+fn test_revocation_failure() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let uid = UID([1u8; 32]);
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: false, // NOT REVOCABLE
+        data: Bytes::new(&env),
+    };
+    
+    env.mock_all_auths();
+    sas_client.attest(&attestation);
+    
+    // Should panic
+    sas_client.revoke(&uid);
+}
