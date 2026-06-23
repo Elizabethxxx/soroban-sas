@@ -39,6 +39,16 @@ impl SAS {
         
         attestation.uid.clone()
     }
+
+    pub fn revoke(env: Env, uid: UID) {
+        let mut attestation: Attestation = env.storage().persistent().get(&uid).expect("Attestation not found");
+        attestation.attester.require_auth();
+        
+        attestation.revocation_time = env.ledger().timestamp();
+        env.storage().persistent().set(&uid, &attestation);
+        
+        env.events().publish((soroban_sdk::Symbol::new(&env, "REVOKED"),), uid.clone());
+    }
 }
 
 #[cfg(test)]
