@@ -40,3 +40,6 @@ impl SAS {
         attestation.uid.clone()
     }
 }
+
+#[cfg(test)]
+mod test;
