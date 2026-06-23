@@ -35,6 +35,8 @@ impl SAS {
         // Store the attestation
         env.storage().persistent().set(&attestation.uid, &attestation);
         
+        env.events().publish((soroban_sdk::Symbol::new(&env, "ATTESTED"),), attestation.clone());
+        
         attestation.uid.clone()
     }
 }
