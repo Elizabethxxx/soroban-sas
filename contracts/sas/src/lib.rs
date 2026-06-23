@@ -44,6 +44,10 @@ impl SAS {
         let mut attestation: Attestation = env.storage().persistent().get(&uid).expect("Attestation not found");
         attestation.attester.require_auth();
         
+        if !attestation.revocable {
+            panic!("Attestation is not revocable");
+        }
+        
         attestation.revocation_time = env.ledger().timestamp();
         env.storage().persistent().set(&uid, &attestation);
         
