@@ -53,6 +53,15 @@ impl SAS {
         
         env.events().publish((soroban_sdk::Symbol::new(&env, "REVOKED"),), uid.clone());
     }
+
+    pub fn multi_attest(env: Env, attestations: soroban_sdk::Vec<Attestation>) -> soroban_sdk::Vec<UID> {
+        let mut uids = soroban_sdk::Vec::new(&env);
+        for attestation in attestations.iter() {
+            let uid = Self::attest(env.clone(), attestation);
+            uids.push_back(uid);
+        }
+        uids
+    }
 }
 
 #[cfg(test)]
