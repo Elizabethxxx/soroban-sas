@@ -62,6 +62,12 @@ impl SAS {
         }
         uids
     }
+
+    pub fn multi_revoke(env: Env, uids: soroban_sdk::Vec<UID>) {
+        for uid in uids.iter() {
+            Self::revoke(env.clone(), uid);
+        }
+    }
 }
 
 #[cfg(test)]
