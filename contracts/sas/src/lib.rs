@@ -79,6 +79,14 @@ impl SAS {
             Self::revoke(env.clone(), uid);
         }
     }
+
+    pub fn verify_attestation(env: Env, uid: UID) -> bool {
+        if let Some(attestation) = env.storage().persistent().get::<_, Attestation>(&uid) {
+            attestation.revocation_time == 0
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
