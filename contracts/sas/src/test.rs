@@ -207,3 +207,56 @@ fn test_revocation_failure() {
     // Should panic
     sas_client.revoke(&uid);
 }
+
+#[test]
+fn test_batch_operations() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let uid1 = UID([3u8; 32]);
+    let uid2 = UID([4u8; 32]);
+    
+    let att1 = Attestation {
+        uid: uid1.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient: recipient.clone(),
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    let att2 = Attestation {
+        uid: uid2.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    env.mock_all_auths();
+    let batch = soroban_sdk::vec![&env, att1, att2];
+    
+    let result = sas_client.multi_attest(&batch);
+    assert_eq!(result.len(), 2);
+    
+    let revoke_batch = soroban_sdk::vec![&env, uid1.clone(), uid2.clone()];
+    sas_client.multi_revoke(&revoke_batch);
+}
