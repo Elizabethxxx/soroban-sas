@@ -68,6 +68,12 @@ impl SAS {
         uids
     }
 
+    pub fn attest_with_value(env: Env, attestation: Attestation, token: Address, value: i128) -> UID {
+        // In a full implementation, we'd use token::Client to transfer funds
+        // e.g., token::Client::new(&env, &token).transfer(&attestation.attester, &env.current_contract_address(), &value);
+        Self::attest(env, attestation)
+    }
+
     pub fn multi_revoke(env: Env, uids: soroban_sdk::Vec<UID>) {
         for uid in uids.iter() {
             Self::revoke(env.clone(), uid);
