@@ -13,6 +13,14 @@ impl MockRegistry {
     pub fn validate_schema(_env: Env, _uid: UID) -> bool {
         true
     }
+    pub fn get_schema(env: Env, uid: UID) -> Option<soroban_sas_common::SchemaRecord> {
+        Some(soroban_sas_common::SchemaRecord {
+            uid: uid.clone(),
+            resolver: Address::generate(&env),
+            revocable: true,
+            schema: soroban_sdk::String::from_str(&env, "bool like"),
+        })
+    }
 }
 
 #[contract]
@@ -22,6 +30,19 @@ pub struct MockRejectRegistry;
 impl MockRejectRegistry {
     pub fn validate_schema(_env: Env, _uid: UID) -> bool {
         false
+    }
+    pub fn get_schema(_env: Env, _uid: UID) -> Option<soroban_sas_common::SchemaRecord> {
+        None
+    }
+}
+
+#[contract]
+pub struct MockResolver;
+
+#[contractimpl]
+impl MockResolver {
+    pub fn on_attest(_env: Env, _attestation: Attestation) {
+        // Mock execution
     }
 }
 
@@ -259,4 +280,40 @@ fn test_batch_operations() {
     
     let revoke_batch = soroban_sdk::vec![&env, uid1.clone(), uid2.clone()];
     sas_client.multi_revoke(&revoke_batch);
+}
+
+#[test]
+fn test_resolver_callback() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let resolver_id = env.register_contract(None, MockResolver);
+    
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let uid = UID([5u8; 32]);
+    
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    env.mock_all_auths();
+    sas_client.attest(&attestation);
+    // Verifies it doesn't panic on try_invoke_contract
 }
