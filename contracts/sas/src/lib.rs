@@ -23,14 +23,19 @@ impl SAS {
         attestation.attester.require_auth();
         
         let registry: Address = env.storage().instance().get(&SCHEMA_REGISTRY).unwrap();
-        let is_valid: bool = env.invoke_contract(
+        let schema_opt: Option<soroban_sas_common::SchemaRecord> = env.invoke_contract(
             &registry,
-            &Symbol::new(&env, "validate_schema"),
+            &Symbol::new(&env, "get_schema"),
             soroban_sdk::vec![&env, attestation.schema_uid.clone().into_val(&env)]
         );
-        if !is_valid {
-            panic!("Invalid schema");
-        }
+        let schema = schema_opt.expect("Invalid schema");
+        
+        // Optional resolver callback support
+        let _ = env.try_invoke_contract::<(), _>(
+            &schema.resolver,
+            &Symbol::new(&env, "on_attest"),
+            soroban_sdk::vec![&env, attestation.clone().into_val(&env)]
+        );
         
         // Store the attestation
         env.storage().persistent().set(&attestation.uid, &attestation);
