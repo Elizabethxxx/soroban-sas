@@ -317,3 +317,36 @@ fn test_resolver_callback() {
     sas_client.attest(&attestation);
     // Verifies it doesn't panic on try_invoke_contract
 }
+
+#[test]
+fn test_attest_with_value() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+    
+    let uid = UID([7u8; 32]);
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    env.mock_all_auths();
+    sas_client.attest_with_value(&attestation, &token, &500);
+}
