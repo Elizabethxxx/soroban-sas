@@ -22,6 +22,10 @@ impl SAS {
     pub fn attest(env: Env, attestation: Attestation) -> UID {
         attestation.attester.require_auth();
         
+        if attestation.expiration_time != 0 && attestation.expiration_time <= env.ledger().timestamp() {
+            panic!("Attestation already expired");
+        }
+        
         let registry: Address = env.storage().instance().get(&SCHEMA_REGISTRY).unwrap();
         let schema_opt: Option<soroban_sas_common::SchemaRecord> = env.invoke_contract(
             &registry,
@@ -82,7 +86,13 @@ impl SAS {
 
     pub fn verify_attestation(env: Env, uid: UID) -> bool {
         if let Some(attestation) = env.storage().persistent().get::<_, Attestation>(&uid) {
-            attestation.revocation_time == 0
+            if attestation.revocation_time != 0 {
+                return false;
+            }
+            if attestation.expiration_time != 0 && env.ledger().timestamp() >= attestation.expiration_time {
+                return false;
+            }
+            true
         } else {
             false
         }
