@@ -350,3 +350,39 @@ fn test_attest_with_value() {
     env.mock_all_auths();
     sas_client.attest_with_value(&attestation, &token, &500);
 }
+
+#[test]
+#[should_panic(expected = "Attestation already expired")]
+fn test_attestation_expiration() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let uid = UID([8u8; 32]);
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 100, // Expired if ledger is > 100
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    // Simulate time advancement
+    env.ledger().set_timestamp(150);
+    
+    env.mock_all_auths();
+    sas_client.attest(&attestation);
+}
