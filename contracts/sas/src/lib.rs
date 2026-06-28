@@ -21,7 +21,20 @@ impl SAS {
 
     pub fn attest(env: Env, attestation: Attestation) -> UID {
         attestation.attester.require_auth();
-        
+        Self::attest_internal(env, attestation)
+    }
+
+    pub fn attest_by_delegation(
+        env: Env, 
+        attestation: Attestation, 
+        _signature: soroban_sdk::BytesN<64>, 
+        _public_key: soroban_sdk::BytesN<32>
+    ) -> UID {
+        // TODO: verify signature (EIP-712 equivalent)
+        Self::attest_internal(env, attestation)
+    }
+
+    fn attest_internal(env: Env, attestation: Attestation) -> UID {
         if attestation.expiration_time != 0 && attestation.expiration_time <= env.ledger().timestamp() {
             panic!("Attestation already expired");
         }
