@@ -27,10 +27,15 @@ impl SAS {
     pub fn attest_by_delegation(
         env: Env, 
         attestation: Attestation, 
-        _signature: soroban_sdk::BytesN<64>, 
-        _public_key: soroban_sdk::BytesN<32>
+        signature: soroban_sdk::BytesN<64>, 
+        public_key: soroban_sdk::BytesN<32>
     ) -> UID {
-        // TODO: verify signature (EIP-712 equivalent)
+        let mut payload = soroban_sdk::Bytes::new(&env);
+        payload.append(&attestation.schema_uid.clone().into_val(&env));
+        payload.append(&attestation.recipient.clone().into_val(&env));
+        
+        env.crypto().ed25519_verify(&public_key, &payload, &signature);
+        
         Self::attest_internal(env, attestation)
     }
 
