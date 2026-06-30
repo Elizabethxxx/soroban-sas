@@ -1,7 +1,9 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol, Bytes, IntoVal};
 use soroban_sas_common::{Attestation, UID};
+
+mod events;
 
 #[contract]
 pub struct SAS;
@@ -62,7 +64,7 @@ impl SAS {
         // Store the attestation
         env.storage().persistent().set(&attestation.uid, &attestation);
         
-        env.events().publish((soroban_sdk::Symbol::new(&env, "ATTESTED"),), attestation.clone());
+        events::publish_attested(&env, &attestation);
         
         attestation.uid.clone()
     }
@@ -97,7 +99,7 @@ impl SAS {
         attestation.revocation_time = env.ledger().timestamp();
         env.storage().persistent().set(&uid, &attestation);
         
-        env.events().publish((soroban_sdk::Symbol::new(&env, "REVOKED"),), uid.clone());
+        events::publish_revoked(&env, &uid);
     }
 
     pub fn multi_attest(env: Env, attestations: soroban_sdk::Vec<Attestation>) -> soroban_sdk::Vec<UID> {
