@@ -68,8 +68,27 @@ impl SAS {
     }
 
     pub fn revoke(env: Env, uid: UID) {
-        let mut attestation: Attestation = env.storage().persistent().get(&uid).expect("Attestation not found");
+        let attestation: Attestation = env.storage().persistent().get(&uid).expect("Attestation not found");
         attestation.attester.require_auth();
+        Self::revoke_internal(env, uid)
+    }
+
+    pub fn revoke_by_delegation(
+        env: Env, 
+        uid: UID, 
+        signature: soroban_sdk::BytesN<64>, 
+        public_key: soroban_sdk::BytesN<32>
+    ) {
+        let mut payload = soroban_sdk::Bytes::new(&env);
+        payload.append(&uid.clone().into_val(&env));
+        
+        env.crypto().ed25519_verify(&public_key, &payload, &signature);
+        
+        Self::revoke_internal(env, uid)
+    }
+
+    fn revoke_internal(env: Env, uid: UID) {
+        let mut attestation: Attestation = env.storage().persistent().get(&uid).expect("Attestation not found");
         
         if !attestation.revocable {
             panic!("Attestation is not revocable");
