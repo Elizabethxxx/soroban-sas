@@ -386,3 +386,39 @@ fn test_attestation_expiration() {
     env.mock_all_auths();
     sas_client.attest(&attestation);
 }
+
+#[test]
+#[should_panic]
+fn test_attest_by_delegation() {
+    let env = Env::default();
+    
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    
+    let uid = UID([9u8; 32]);
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    let signature = soroban_sdk::BytesN::from_array(&env, &[0u8; 64]);
+    let pub_key = soroban_sdk::BytesN::from_array(&env, &[0u8; 32]);
+    
+    env.mock_all_auths();
+    sas_client.attest_by_delegation(&attestation, &signature, &pub_key);
+}
