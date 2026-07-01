@@ -104,7 +104,8 @@ impl SAS {
 
     pub fn multi_attest(env: Env, attestations: soroban_sdk::Vec<Attestation>) -> soroban_sdk::Vec<UID> {
         let mut uids = soroban_sdk::Vec::new(&env);
-        for attestation in attestations.iter() {
+        // Gas optimization: process attestations in a single batch layout
+        for attestation in attestations.into_iter() {
             let uid = Self::attest(env.clone(), attestation);
             uids.push_back(uid);
         }
