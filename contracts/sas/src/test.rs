@@ -422,3 +422,45 @@ fn test_attest_by_delegation() {
     env.mock_all_auths();
     sas_client.attest_by_delegation(&attestation, &signature, &pub_key);
 }
+
+#[test]
+fn test_comprehensive_lifecycle() {
+    let env = Env::default();
+    let registry_id = env.register_contract(None, MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+    
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+    
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let uid = UID([10u8; 32]);
+    
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID([2u8; 32]),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID([0u8; 32]),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+    
+    env.mock_all_auths();
+    
+    // 1. Attest
+    let _ = sas_client.attest(&attestation);
+    
+    // 2. Verify valid
+    assert!(sas_client.verify_attestation(&uid));
+    
+    // 3. Revoke
+    sas_client.revoke(&uid);
+    
+    // 4. Verify invalid
+    assert!(!sas_client.verify_attestation(&uid));
+}
