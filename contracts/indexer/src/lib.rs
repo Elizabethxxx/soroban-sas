@@ -16,5 +16,10 @@ impl Indexer {
         let mut recipient_uids: soroban_sdk::Vec<UID> = _env.storage().persistent().get(&_recipient).unwrap_or_else(|| soroban_sdk::Vec::new(&_env));
         recipient_uids.push_back(_uid.clone());
         _env.storage().persistent().set(&_recipient, &recipient_uids);
+        
+        // Schema -> Vec<UID>
+        let mut schema_uids: soroban_sdk::Vec<UID> = _env.storage().persistent().get(&_schema_uid).unwrap_or_else(|| soroban_sdk::Vec::new(&_env));
+        schema_uids.push_back(_uid.clone());
+        _env.storage().persistent().set(&_schema_uid, &schema_uids);
     }
 }
