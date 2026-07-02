@@ -5,6 +5,8 @@ use soroban_sas_common::{Attestation, UID};
 
 mod events;
 
+// v1.0.0 State Schema Frozen
+
 #[contract]
 pub struct SAS;
 
