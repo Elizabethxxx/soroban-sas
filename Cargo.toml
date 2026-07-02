@@ -1,7 +1,9 @@
 [workspace]
 members = [
-    "contracts/*",
-    "packages/*",
+    "packages/soroban-sas-common",
+    "contracts/schema-registry",
+    "contracts/sas",
+    "contracts/indexer",
 ]
 resolver = "2"
 

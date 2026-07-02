@@ -1,0 +1,11 @@
+[package]
+name = "soroban-sas-indexer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+soroban-sdk = "22.0.0"
+soroban-sas-common = { path = "../../packages/soroban-sas-common" }
+
+[lib]
+crate-type = ["cdylib"]
