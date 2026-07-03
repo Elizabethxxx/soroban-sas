@@ -24,6 +24,11 @@ impl Indexer {
         schema_uids.push_back(_uid.clone());
         _env.storage().persistent().set(&(_schema_uid, chunk_index), &schema_uids);
     }
+
+    pub fn get_attestations_by_recipient(env: Env, recipient: Address) -> soroban_sdk::Vec<UID> {
+        let chunk_index = 0u32;
+        env.storage().persistent().get(&(recipient, chunk_index)).unwrap_or_else(|| soroban_sdk::Vec::new(&env))
+    }
 }
 
 #[cfg(test)]
