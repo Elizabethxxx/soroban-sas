@@ -25,3 +25,6 @@ impl Indexer {
         _env.storage().persistent().set(&(_schema_uid, chunk_index), &schema_uids);
     }
 }
+
+#[cfg(test)]
+mod test;
