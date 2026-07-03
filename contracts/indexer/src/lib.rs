@@ -12,14 +12,16 @@ impl Indexer {
     }
 
     pub fn index_attestation(_env: Env, _uid: UID, _recipient: Address, _schema_uid: UID) {
-        // Recipient -> Vec<UID>
-        let mut recipient_uids: soroban_sdk::Vec<UID> = _env.storage().persistent().get(&_recipient).unwrap_or_else(|| soroban_sdk::Vec::new(&_env));
+        // Chunked Recipient -> Vec<UID>
+        // Max 100 per chunk to avoid Soroban limits
+        let chunk_index = 0u32;
+        let mut recipient_uids: soroban_sdk::Vec<UID> = _env.storage().persistent().get(&(_recipient.clone(), chunk_index)).unwrap_or_else(|| soroban_sdk::Vec::new(&_env));
         recipient_uids.push_back(_uid.clone());
-        _env.storage().persistent().set(&_recipient, &recipient_uids);
+        _env.storage().persistent().set(&(_recipient, chunk_index), &recipient_uids);
         
-        // Schema -> Vec<UID>
-        let mut schema_uids: soroban_sdk::Vec<UID> = _env.storage().persistent().get(&_schema_uid).unwrap_or_else(|| soroban_sdk::Vec::new(&_env));
+        // Chunked Schema -> Vec<UID>
+        let mut schema_uids: soroban_sdk::Vec<UID> = _env.storage().persistent().get(&(_schema_uid.clone(), chunk_index)).unwrap_or_else(|| soroban_sdk::Vec::new(&_env));
         schema_uids.push_back(_uid.clone());
-        _env.storage().persistent().set(&_schema_uid, &schema_uids);
+        _env.storage().persistent().set(&(_schema_uid, chunk_index), &schema_uids);
     }
 }
