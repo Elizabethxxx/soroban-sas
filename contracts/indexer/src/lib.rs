@@ -2,6 +2,8 @@
 use soroban_sdk::{contract, contractimpl, Address, Env};
 use soroban_sas_common::UID;
 
+// v1.0.0 Indexer logic frozen
+
 #[contract]
 pub struct Indexer;
 
