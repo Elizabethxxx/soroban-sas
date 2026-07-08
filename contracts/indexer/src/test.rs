@@ -12,8 +12,9 @@ fn test_index_single_attestation() {
     let uid = UID([1u8; 32]);
     let schema_uid = UID([2u8; 32]);
     let recipient = Address::generate(&env);
+    let attester = Address::generate(&env);
     
-    client.index_attestation(&uid, &recipient, &schema_uid);
+    client.index_attestation(&uid, &recipient, &schema_uid, &attester);
 }
 
 #[test]
@@ -24,13 +25,14 @@ fn test_chunked_storage_limits() {
     
     let schema_uid = UID([3u8; 32]);
     let recipient = Address::generate(&env);
+    let attester = Address::generate(&env);
     
     // Simulate exceeding a chunk limit
     for i in 0..150u8 {
         let mut bytes = [0u8; 32];
         bytes[0] = i;
         let uid = UID(bytes);
-        client.index_attestation(&uid, &recipient, &schema_uid);
+        client.index_attestation(&uid, &recipient, &schema_uid, &attester);
     }
 }
 
@@ -42,16 +44,38 @@ fn test_reverse_lookup() {
     
     let schema_uid = UID([4u8; 32]);
     let recipient = Address::generate(&env);
+    let attester = Address::generate(&env);
     
     let uid1 = UID([10u8; 32]);
     let uid2 = UID([11u8; 32]);
     
-    client.index_attestation(&uid1, &recipient, &schema_uid);
-    client.index_attestation(&uid2, &recipient, &schema_uid);
+    client.index_attestation(&uid1, &recipient, &schema_uid, &attester);
+    client.index_attestation(&uid2, &recipient, &schema_uid, &attester);
     
     let recipient_uids = client.get_attestations_by_recipient(&recipient);
     assert_eq!(recipient_uids.len(), 2);
     
     let schema_uids = client.get_attestations_by_schema(&schema_uid);
     assert_eq!(schema_uids.len(), 2);
+}
+
+#[test]
+fn test_attester_indexing_large_datasets() {
+    let env = Env::default();
+    let indexer_id = env.register_contract(None, Indexer);
+    let client = IndexerClient::new(&env, &indexer_id);
+    
+    let schema_uid = UID([5u8; 32]);
+    let recipient = Address::generate(&env);
+    let attester = Address::generate(&env);
+    
+    for i in 0..50u8 {
+        let mut bytes = [0u8; 32];
+        bytes[0] = i;
+        let uid = UID(bytes);
+        client.index_attestation(&uid, &recipient, &schema_uid, &attester);
+    }
+    
+    let attester_uids = client.get_attestations_by_attester(&attester);
+    assert_eq!(attester_uids.len(), 50);
 }
