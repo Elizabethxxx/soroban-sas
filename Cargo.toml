@@ -4,6 +4,7 @@ members = [
     "contracts/schema-registry",
     "contracts/sas",
     "contracts/indexer",
+    "packages/soroban-sas-sdk",
 ]
 resolver = "2"
 
