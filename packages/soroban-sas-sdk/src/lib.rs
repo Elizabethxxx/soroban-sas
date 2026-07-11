@@ -7,3 +7,10 @@ pub mod client;
 pub mod schema_builder;
 
 pub fn init() {}
+pub mod attestation_builder;
+pub mod signature;
+pub mod rpc;
+pub mod transaction;
+
+#[cfg(test)]
+mod test;
