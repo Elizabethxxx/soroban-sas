@@ -11,6 +11,7 @@ pub mod attestation_builder;
 pub mod signature;
 pub mod rpc;
 pub mod transaction;
+pub mod batch;
 
 #[cfg(test)]
 mod test;
