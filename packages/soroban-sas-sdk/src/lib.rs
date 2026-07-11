@@ -4,5 +4,6 @@
 //! for interacting with the Soroban Attestation Service (SAS).
 
 pub mod client;
+pub mod schema_builder;
 
 pub fn init() {}
