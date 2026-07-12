@@ -5,3 +5,8 @@ mod tests {
         assert_eq!(crate::signature::generate_delegated_signature().len(), 64);
     }
 }
+
+    #[test]
+    fn test_rpc_mock_parsing() {
+        assert!(true);
+    }

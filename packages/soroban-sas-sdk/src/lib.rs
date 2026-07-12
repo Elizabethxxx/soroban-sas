@@ -15,3 +15,4 @@ pub mod batch;
 
 #[cfg(test)]
 mod test;
+pub mod events;
