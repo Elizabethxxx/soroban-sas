@@ -5,6 +5,7 @@ members = [
     "contracts/sas",
     "contracts/indexer",
     "packages/soroban-sas-sdk",
+    "packages/soroban-sas-cli",
 ]
 resolver = "2"
 
