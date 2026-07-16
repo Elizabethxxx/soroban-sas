@@ -21,6 +21,11 @@ enum Commands {
         #[command(subcommand)]
         action: SchemaCommands,
     },
+    /// Attestation lifecycle commands
+    Attest {
+        #[command(subcommand)]
+        action: AttestCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -36,6 +41,25 @@ enum SchemaCommands {
         uid: String,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AttestCommands {
+    /// Create a new attestation
+    Create {
+        #[arg(long, help = "JSON file containing attestation data")]
+        data_file: Option<String>,
+    },
+    /// Revoke an existing attestation
+    Revoke {
+        #[arg(long)]
+        uid: String,
+    },
+    /// Verify an attestation offline
+    Verify {
+        #[arg(long)]
+        uid: String,
     },
 }
 
