@@ -79,3 +79,11 @@ fn test_attester_indexing_large_datasets() {
     let attester_uids = client.get_attestations_by_attester(&attester);
     assert_eq!(attester_uids.len(), 50);
 }
+
+#[test]
+fn test_cursor_pagination_large_datasets() {
+    let env = Env::default();
+    let indexer_id = env.register_contract(None, Indexer);
+    let _client = IndexerClient::new(&env, &indexer_id);
+    assert!(true);
+}

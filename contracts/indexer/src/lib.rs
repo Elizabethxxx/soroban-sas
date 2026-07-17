@@ -46,6 +46,11 @@ impl Indexer {
         let chunk_index = 0u32;
         env.storage().persistent().get(&(attester, chunk_index)).unwrap_or_else(|| soroban_sdk::Vec::new(&env))
     }
+
+    pub fn get_attestations_by_recipient_paginated(env: Env, recipient: Address, cursor: u32, _limit: u32) -> soroban_sdk::Vec<UID> {
+        let chunk_index = cursor / 100;
+        env.storage().persistent().get(&(recipient, chunk_index)).unwrap_or_else(|| soroban_sdk::Vec::new(&env))
+    }
 }
 
 #[cfg(test)]
