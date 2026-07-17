@@ -26,6 +26,16 @@ enum Commands {
         #[command(subcommand)]
         action: AttestCommands,
     },
+    /// Indexer query commands
+    Query {
+        #[command(subcommand)]
+        action: QueryCommands,
+    },
+    /// Generate off-chain delegated signatures
+    Delegate {
+        #[arg(long, help = "JSON payload to sign")]
+        payload: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -63,7 +73,24 @@ enum AttestCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum QueryCommands {
+    /// Query attestations by recipient address
+    ByRecipient {
+        #[arg(long)]
+        address: String,
+    },
+    /// Query attestations by schema UID
+    BySchema {
+        #[arg(long)]
+        uid: String,
+    },
+}
+
 fn main() {
     let _cli = Cli::parse();
     println!("CLI initialized");
 }
+
+#[cfg(test)]
+mod test;
