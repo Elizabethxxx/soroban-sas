@@ -6,7 +6,6 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_rpc_mock_parsing() {
-        assert!(true);
-    }
+#[test]
+fn test_rpc_mock_parsing() {
+}

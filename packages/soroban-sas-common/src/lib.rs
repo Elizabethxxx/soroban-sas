@@ -1,22 +1,23 @@
+#![allow(unexpected_cfgs)]
 #![no_std]
 pub mod errors;
-pub mod validation;
-pub mod signature;
 pub mod events;
-pub mod merkle;
 pub mod macros;
+pub mod merkle;
+pub mod signature;
+pub mod validation;
 
 pub use errors::*;
-pub use validation::*;
-pub use signature::*;
 pub use events::*;
 pub use merkle::*;
+pub use signature::*;
+pub use validation::*;
 
-use soroban_sdk::{contracttype, Address, String, Bytes};
+use soroban_sdk::{contracttype, Address, Bytes, String};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UID(pub [u8; 32]);
+pub struct UID(pub soroban_sdk::BytesN<32>);
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -1,5 +1,5 @@
-use soroban_sdk::{Env, String, Address};
 use crate::errors::SASError;
+use soroban_sdk::{Address, Env, String};
 
 const MAX_SCHEMA_LENGTH: u32 = 1024;
 
@@ -25,7 +25,11 @@ pub fn validate_recipient(_env: &Env, _recipient: &Address) -> Result<(), SASErr
     Ok(())
 }
 
-pub fn check_revocable(_env: &Env, schema_revocable: bool, attestation_revocable: bool) -> Result<(), SASError> {
+pub fn check_revocable(
+    _env: &Env,
+    schema_revocable: bool,
+    attestation_revocable: bool,
+) -> Result<(), SASError> {
     if !schema_revocable && attestation_revocable {
         return Err(SASError::NotRevocable);
     }
