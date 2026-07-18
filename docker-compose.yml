@@ -1,1 +1,18 @@
 version: "3"
+
+services:
+  stellar-quickstart:
+    image: stellar/quickstart:testing
+    command: --standalone --enable-soroban-rpc
+    ports:
+      - "8000:8000"
+    volumes:
+      - quickstart_data:/opt/stellar
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  quickstart_data:

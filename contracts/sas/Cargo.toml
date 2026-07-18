@@ -9,3 +9,6 @@ soroban-sas-common = { path = "../../packages/soroban-sas-common" }
 
 [lib]
 crate-type = ["cdylib"]
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

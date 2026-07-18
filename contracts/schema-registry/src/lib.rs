@@ -1,8 +1,9 @@
+#![allow(unexpected_cfgs)]
 #![no_std]
 #![allow(unused_variables)]
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Env, Symbol, String, Bytes};
 use soroban_sas_common::{SchemaRecord, UID};
+use soroban_sdk::{contract, contractimpl, xdr::ToXdr, Address, Bytes, Env, String};
 
 #[contract]
 pub struct SchemaRegistry;
@@ -50,15 +51,15 @@ impl SchemaRegistry {
 
     pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
         let mut payload = Bytes::new(&env);
-        payload.append(&schema.clone().into());
-        
+        payload.append(&schema.clone().to_xdr(&env));
+
         let hash = env.crypto().sha256(&payload);
-        let uid = UID(hash.into());
-        
+        let uid = UID(hash);
+
         if env.storage().persistent().has(&uid) {
             soroban_sdk::panic_with_error!(&env, soroban_sas_common::SASError::SchemaAlreadyExists);
         }
-        
+
         let record = SchemaRecord {
             uid: uid.clone(),
             resolver,
@@ -66,26 +67,37 @@ impl SchemaRegistry {
             schema,
         };
         env.storage().persistent().set(&uid, &record);
-        
+
         let mut count: u32 = env.storage().persistent().get(&SCHEMA_COUNT).unwrap_or(0);
         env.storage().persistent().set(&count, &uid);
         count += 1;
         env.storage().persistent().set(&SCHEMA_COUNT, &count);
-        
-        env.events().publish((soroban_sas_common::events::REGISTERED,), uid.clone());
-        
+
+        env.events()
+            .publish((soroban_sas_common::events::REGISTERED,), uid.clone());
+
         uid
     }
 
     pub fn get_schema(env: Env, uid: UID) -> Option<SchemaRecord> {
-        if env.storage().persistent().get(&(DEPRECATED, uid.clone())).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get(&(DEPRECATED, uid.clone()))
+            .unwrap_or(false)
+        {
             return None;
         }
         env.storage().persistent().get(&uid)
     }
 
     pub fn validate_schema(env: Env, uid: UID) -> bool {
-        if env.storage().persistent().get(&(DEPRECATED, uid.clone())).unwrap_or(false) {
+        if env
+            .storage()
+            .persistent()
+            .get(&(DEPRECATED, uid.clone()))
+            .unwrap_or(false)
+        {
             return false;
         }
         env.storage().persistent().has(&uid)
@@ -94,8 +106,12 @@ impl SchemaRegistry {
     pub fn get_schemas(env: Env, start: u32, limit: u32) -> soroban_sdk::Vec<SchemaRecord> {
         let mut schemas = soroban_sdk::Vec::new(&env);
         let count: u32 = env.storage().persistent().get(&SCHEMA_COUNT).unwrap_or(0);
-        
-        let end = if start + limit > count { count } else { start + limit };
+
+        let end = if start + limit > count {
+            count
+        } else {
+            start + limit
+        };
         for i in start..end {
             if let Some(uid) = env.storage().persistent().get::<u32, UID>(&i) {
                 if let Some(record) = env.storage().persistent().get(&uid) {

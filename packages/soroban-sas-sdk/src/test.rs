@@ -7,5 +7,4 @@ mod tests {
 }
 
 #[test]
-fn test_rpc_mock_parsing() {
-}
+fn test_rpc_mock_parsing() {}
