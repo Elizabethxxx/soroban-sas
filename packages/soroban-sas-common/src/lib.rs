@@ -5,12 +5,14 @@ pub mod events;
 pub mod macros;
 pub mod merkle;
 pub mod signature;
+pub mod typed_data;
 pub mod validation;
 
 pub use errors::*;
 pub use events::*;
 pub use merkle::*;
 pub use signature::*;
+pub use typed_data::*;
 pub use validation::*;
 
 use soroban_sdk::{contracttype, Address, Bytes, String};

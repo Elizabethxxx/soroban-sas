@@ -1,9 +1,10 @@
 #![allow(unexpected_cfgs)]
 #![no_std]
 
-use soroban_sas_common::{Attestation, UID};
+use soroban_sas_common::{Attestation, SASError, UID};
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, xdr::ToXdr, Address, Env, IntoVal, Symbol,
+    contract, contractimpl, panic_with_error, symbol_short, xdr::ToXdr, Address, Env, IntoVal,
+    Symbol,
 };
 
 mod events;
@@ -149,6 +150,61 @@ impl SAS {
         for uid in uids.iter() {
             Self::revoke(env.clone(), uid);
         }
+    }
+
+    /// Verifies an off-chain attestation signed by the attester's ed25519 key.
+    ///
+    /// The signed digest commits to the current network id, this contract's
+    /// address, and `nonce` (see `soroban_sas_common::typed_data`), so a
+    /// signature cannot be replayed on another network, against another
+    /// contract, or under a different nonce. Panics if the public key does
+    /// not belong to the declared attester (`SASError::Unauthorized`), if the
+    /// attestation is revoked locally or by an on-chain revocation of the
+    /// same UID (`SASError::AlreadyRevoked`), if it is expired
+    /// (`SASError::AlreadyExpired`), or if the signature is invalid
+    /// (`ed25519_verify` host error).
+    pub fn verify_offchain_attestation(
+        env: Env,
+        attestation: Attestation,
+        nonce: u64,
+        public_key: soroban_sdk::BytesN<32>,
+        signature: soroban_sdk::BytesN<64>,
+    ) -> bool {
+        if !soroban_sas_common::attester_matches_key(&env, &attestation.attester, &public_key) {
+            panic_with_error!(&env, SASError::Unauthorized);
+        }
+
+        if attestation.revocation_time != 0 {
+            panic_with_error!(&env, SASError::AlreadyRevoked);
+        }
+        if attestation.expiration_time != 0
+            && env.ledger().timestamp() >= attestation.expiration_time
+        {
+            panic_with_error!(&env, SASError::AlreadyExpired);
+        }
+
+        // An on-chain revocation of the same UID also invalidates the
+        // off-chain copy.
+        if let Some(stored) = env
+            .storage()
+            .persistent()
+            .get::<_, Attestation>(&attestation.uid)
+        {
+            if stored.revocation_time != 0 {
+                panic_with_error!(&env, SASError::AlreadyRevoked);
+            }
+        }
+
+        let domain = soroban_sas_common::AttestationDomain {
+            network_id: env.ledger().network_id(),
+            contract: env.current_contract_address(),
+            nonce,
+        };
+        let payload_hash =
+            soroban_sas_common::hash_offchain_attestation(&env, &attestation, &domain);
+        soroban_sas_common::verify_offchain_signature(&env, &payload_hash, &public_key, &signature);
+
+        true
     }
 
     pub fn verify_attestation(env: Env, uid: UID) -> bool {

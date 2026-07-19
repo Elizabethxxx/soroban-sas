@@ -442,6 +442,170 @@ fn test_attest_by_delegation() {
 }
 */
 
+mod offchain {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use soroban_sas_common::{hash_offchain_attestation, AttestationDomain};
+    use soroban_sdk::{BytesN, String as SorobanString};
+
+    pub struct Setup {
+        pub env: Env,
+        pub sas_client: SASClient<'static>,
+        pub sas_id: Address,
+        pub signing_key: SigningKey,
+        pub attestation: Attestation,
+    }
+
+    pub fn setup(seed: [u8; 32]) -> Setup {
+        let env = Env::default();
+        let registry_id = env.register_contract(None, mock1::MockRegistry);
+        let sas_id = env.register_contract(None, SAS);
+        let sas_client = SASClient::new(&env, &sas_id);
+
+        let admin = Address::generate(&env);
+        sas_client.init(&admin, &registry_id);
+
+        let signing_key = SigningKey::from_bytes(&seed);
+        let attester_strkey =
+            stellar_strkey::ed25519::PublicKey(signing_key.verifying_key().to_bytes()).to_string();
+        let attester = Address::from_string(&SorobanString::from_str(&env, &attester_strkey));
+
+        let attestation = Attestation {
+            uid: UID(BytesN::from_array(&env, &[42u8; 32])),
+            schema_uid: UID(BytesN::from_array(&env, &[2u8; 32])),
+            time: 1000,
+            expiration_time: 0,
+            revocation_time: 0,
+            ref_uid: UID(BytesN::from_array(&env, &[0u8; 32])),
+            recipient: Address::generate(&env),
+            attester,
+            revocable: true,
+            data: Bytes::from_slice(&env, &[1, 2, 3]),
+        };
+
+        Setup {
+            env,
+            sas_client,
+            sas_id,
+            signing_key,
+            attestation,
+        }
+    }
+
+    pub fn sign(setup: &Setup, attestation: &Attestation, nonce: u64) -> BytesN<64> {
+        let domain = AttestationDomain {
+            network_id: setup.env.ledger().network_id(),
+            contract: setup.sas_id.clone(),
+            nonce,
+        };
+        let payload_hash = hash_offchain_attestation(&setup.env, attestation, &domain);
+        let signature = setup.signing_key.sign(&payload_hash.to_array());
+        BytesN::from_array(&setup.env, &signature.to_bytes())
+    }
+
+    pub fn public_key(setup: &Setup) -> BytesN<32> {
+        BytesN::from_array(&setup.env, &setup.signing_key.verifying_key().to_bytes())
+    }
+}
+
+#[test]
+fn test_verify_offchain_attestation_valid() {
+    let s = offchain::setup([31u8; 32]);
+    let signature = offchain::sign(&s, &s.attestation, 7);
+    assert!(s.sas_client.verify_offchain_attestation(
+        &s.attestation,
+        &7,
+        &offchain::public_key(&s),
+        &signature
+    ));
+}
+
+#[test]
+fn test_verify_offchain_attestation_tampered_data() {
+    let s = offchain::setup([31u8; 32]);
+    let signature = offchain::sign(&s, &s.attestation, 7);
+
+    let mut tampered = s.attestation.clone();
+    tampered.data = Bytes::from_slice(&s.env, &[9, 9, 9]);
+
+    let res = s.sas_client.try_verify_offchain_attestation(
+        &tampered,
+        &7,
+        &offchain::public_key(&s),
+        &signature,
+    );
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_verify_offchain_attestation_wrong_key() {
+    let s = offchain::setup([31u8; 32]);
+    let signature = offchain::sign(&s, &s.attestation, 7);
+
+    // A different keypair: fails the attester binding check.
+    let other = offchain::setup([32u8; 32]);
+    let res = s.sas_client.try_verify_offchain_attestation(
+        &s.attestation,
+        &7,
+        &offchain::public_key(&other),
+        &signature,
+    );
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_verify_offchain_attestation_nonce_replay_bound() {
+    let s = offchain::setup([31u8; 32]);
+    let signature = offchain::sign(&s, &s.attestation, 7);
+
+    // The same signature under a different nonce must not verify.
+    let res = s.sas_client.try_verify_offchain_attestation(
+        &s.attestation,
+        &8,
+        &offchain::public_key(&s),
+        &signature,
+    );
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_verify_offchain_attestation_expired() {
+    let s = offchain::setup([31u8; 32]);
+    let mut expired = s.attestation.clone();
+    expired.expiration_time = 100;
+    let signature = offchain::sign(&s, &expired, 7);
+
+    s.env.ledger().with_mut(|li| li.timestamp = 150);
+
+    let res = s.sas_client.try_verify_offchain_attestation(
+        &expired,
+        &7,
+        &offchain::public_key(&s),
+        &signature,
+    );
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_verify_offchain_attestation_invalidated_by_onchain_revocation() {
+    let s = offchain::setup([31u8; 32]);
+    let signature = offchain::sign(&s, &s.attestation, 7);
+
+    // Record the same attestation on-chain, then revoke it.
+    s.env.mock_all_auths();
+    s.sas_client.attest(&s.attestation);
+    s.env.ledger().with_mut(|li| li.timestamp = 100);
+    s.sas_client.revoke(&s.attestation.uid);
+
+    let res = s.sas_client.try_verify_offchain_attestation(
+        &s.attestation,
+        &7,
+        &offchain::public_key(&s),
+        &signature,
+    );
+    assert!(res.is_err());
+}
+
 #[test]
 fn test_comprehensive_lifecycle() {
     let env = Env::default();

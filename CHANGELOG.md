@@ -13,3 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indexer contract for reverse lookups.
 - CLI tool (`soroban-sas-cli`) for interacting with contracts.
 - SDK wrapper (`soroban-sas-sdk`) for dApp integration.
+- EIP-712 style off-chain attestations: deterministic typed-data hashing and
+  ed25519 verification utilities in `soroban-sas-common`, a
+  `verify_offchain_attestation` entrypoint in the SAS contract, and
+  `offchain sign` / `offchain verify` CLI commands.
