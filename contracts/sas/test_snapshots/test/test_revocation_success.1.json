@@ -1010,6 +1010,16 @@
             "topics": [
               {
                 "symbol": "ATTESTED"
+              },
+              {
+                "vec": [
+                  {
+                    "bytes": "0202020202020202020202020202020202020202020202020202020202020202"
+                  }
+                ]
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
               }
             ],
             "data": {
@@ -1024,54 +1034,10 @@
                 },
                 {
                   "key": {
-                    "symbol": "data"
-                  },
-                  "val": {
-                    "bytes": ""
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "expiration_time"
-                  },
-                  "val": {
-                    "u64": 0
-                  }
-                },
-                {
-                  "key": {
                     "symbol": "recipient"
                   },
                   "val": {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "ref_uid"
-                  },
-                  "val": {
-                    "vec": [
-                      {
-                        "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "revocable"
-                  },
-                  "val": {
-                    "bool": true
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "revocation_time"
-                  },
-                  "val": {
-                    "u64": 0
                   }
                 },
                 {
@@ -1084,14 +1050,6 @@
                         "bytes": "0202020202020202020202020202020202020202020202020202020202020202"
                       }
                     ]
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "time"
-                  },
-                  "val": {
-                    "u64": 1000
                   }
                 },
                 {
@@ -1180,12 +1138,36 @@
             "topics": [
               {
                 "symbol": "REVOKED"
+              },
+              {
+                "vec": [
+                  {
+                    "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
+                  }
+                ]
               }
             ],
             "data": {
-              "vec": [
+              "map": [
                 {
-                  "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 0
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "uid"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
+                      }
+                    ]
+                  }
                 }
               ]
             }

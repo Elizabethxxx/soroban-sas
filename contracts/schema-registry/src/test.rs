@@ -1,6 +1,7 @@
 use crate::{SchemaRegistry, SchemaRegistryClient};
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Env, String};
+use soroban_sas_common::SchemaRegisteredEvent;
+use soroban_sdk::testutils::{Address as _, Events as _};
+use soroban_sdk::{symbol_short, Address, Env, IntoVal, String};
 
 #[test]
 fn test_register_schema() {
@@ -8,15 +9,47 @@ fn test_register_schema() {
     let contract_id = env.register_contract(None, SchemaRegistry);
     let client = SchemaRegistryClient::new(&env, &contract_id);
 
+    let owner = Address::generate(&env);
     let schema_str = String::from_str(&env, "bool like_soroban");
     let resolver = Address::generate(&env);
 
-    let uid = client.register(&schema_str, &resolver, &true);
+    env.mock_all_auths();
+    let uid = client.register(&owner, &schema_str, &resolver, &true);
     let record = client.get_schema(&uid).unwrap();
 
     assert_eq!(record.schema, schema_str);
     assert!(record.revocable);
     assert_eq!(record.resolver, resolver);
+}
+
+#[test]
+fn test_register_emits_schema_registered_event() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let schema_str = String::from_str(&env, "bool like_soroban");
+    let resolver = Address::generate(&env);
+
+    env.mock_all_auths();
+    let uid = client.register(&owner, &schema_str, &resolver, &true);
+
+    let expected = SchemaRegisteredEvent {
+        schema_uid: uid.clone(),
+        owner: owner.clone(),
+    };
+    assert_eq!(
+        env.events().all(),
+        soroban_sdk::vec![
+            &env,
+            (
+                contract_id.clone(),
+                (symbol_short!("REGISTER"), uid.clone()).into_val(&env),
+                expected.into_val(&env),
+            )
+        ]
+    );
 }
 
 /*
@@ -81,10 +114,12 @@ fn test_deprecate() {
     let contract_id = env.register_contract(None, SchemaRegistry);
     let client = SchemaRegistryClient::new(&env, &contract_id);
 
+    let owner = Address::generate(&env);
     let schema_str = String::from_str(&env, "bool like_soroban");
     let resolver = Address::generate(&env);
 
-    let uid = client.register(&schema_str, &resolver, &true);
+    env.mock_all_auths();
+    let uid = client.register(&owner, &schema_str, &resolver, &true);
 
     // Check it's active
     assert!(client.get_schema(&uid).is_some());
@@ -102,10 +137,12 @@ fn test_validate_schema() {
     let contract_id = env.register_contract(None, SchemaRegistry);
     let client = SchemaRegistryClient::new(&env, &contract_id);
 
+    let owner = Address::generate(&env);
     let schema_str = String::from_str(&env, "bool like_soroban");
     let resolver = Address::generate(&env);
 
-    let uid = client.register(&schema_str, &resolver, &true);
+    env.mock_all_auths();
+    let uid = client.register(&owner, &schema_str, &resolver, &true);
 
     assert!(client.validate_schema(&uid));
 
