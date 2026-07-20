@@ -31,8 +31,7 @@
           "sub_invocations": []
         }
       ]
-    ],
-    []
+    ]
   ],
   "ledger": {
     "protocol_version": 20,
@@ -381,96 +380,6 @@
               "vec": [
                 {
                   "bytes": "539c8212b21300c7a2760cae763335794f0a4abd5f1b67acc6abbd2f04690bd1"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
-              },
-              {
-                "symbol": "get_schema"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "bytes": "539c8212b21300c7a2760cae763335794f0a4abd5f1b67acc6abbd2f04690bd1"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "get_schema"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "resolver"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "revocable"
-                  },
-                  "val": {
-                    "bool": true
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "schema"
-                  },
-                  "val": {
-                    "string": "bool like_soroban"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "uid"
-                  },
-                  "val": {
-                    "vec": [
-                      {
-                        "bytes": "539c8212b21300c7a2760cae763335794f0a4abd5f1b67acc6abbd2f04690bd1"
-                      }
-                    ]
-                  }
                 }
               ]
             }

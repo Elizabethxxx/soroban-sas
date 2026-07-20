@@ -115,10 +115,11 @@ impl SAS {
             panic!("Attestation is not revocable");
         }
 
-        attestation.revocation_time = env.ledger().timestamp();
+        let timestamp = env.ledger().timestamp();
+        attestation.revocation_time = timestamp;
         env.storage().persistent().set(&uid, &attestation);
 
-        events::publish_revoked(&env, &uid);
+        events::publish_revoked(&env, &uid, timestamp);
     }
 
     pub fn multi_attest(

@@ -49,7 +49,17 @@ impl SchemaRegistry {
         env.storage().persistent().set(&(DEPRECATED, uid), &true);
     }
 
-    pub fn register(env: Env, schema: String, resolver: Address, revocable: bool) -> UID {
+    pub fn register(
+        env: Env,
+        owner: Address,
+        schema: String,
+        resolver: Address,
+        revocable: bool,
+    ) -> UID {
+        // The owner must authorize the registration so the emitted event
+        // carries a caller identity that off-chain indexers can trust.
+        owner.require_auth();
+
         let mut payload = Bytes::new(&env);
         payload.append(&schema.clone().to_xdr(&env));
 
@@ -73,8 +83,13 @@ impl SchemaRegistry {
         count += 1;
         env.storage().persistent().set(&SCHEMA_COUNT, &count);
 
-        env.events()
-            .publish((soroban_sas_common::events::REGISTERED,), uid.clone());
+        env.events().publish(
+            (soroban_sas_common::events::REGISTERED, uid.clone()),
+            soroban_sas_common::SchemaRegisteredEvent {
+                schema_uid: uid.clone(),
+                owner,
+            },
+        );
 
         uid
     }
