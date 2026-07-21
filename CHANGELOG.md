@@ -13,3 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indexer contract for reverse lookups.
 - CLI tool (`soroban-sas-cli`) for interacting with contracts.
 - SDK wrapper (`soroban-sas-sdk`) for dApp integration.
+
+### Known Issues
+- `SchemaRegistry::deprecate` currently lacks an authorization check.
+- Delegated attest/revoke signatures do not bind the full attestation payload or a nonce, permitting potential replay.
