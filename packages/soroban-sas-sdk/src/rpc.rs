@@ -2,10 +2,13 @@
 //!
 //! This does not perform network I/O yet — it builds well-typed JSON-RPC
 //! request bodies for the Soroban RPC methods the SDK will need to submit
-//! and track transactions. Wiring an actual HTTP transport (and the
-//! matching response types) is a follow-up.
+//! and track transactions, and parses the matching JSON-RPC responses.
+//! Wiring an actual HTTP transport is a follow-up (deliberately deferred:
+//! it's a separate dependency decision, e.g. which HTTP client / TLS stack
+//! to pull in).
 
-use serde::Serialize;
+use crate::errors::SdkError;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// A Soroban RPC endpoint the SDK will submit requests to,
 /// e.g. `https://soroban-testnet.stellar.org`.
@@ -48,6 +51,86 @@ impl RpcClient {
             },
         )
     }
+
+    /// Parses a raw `sendTransaction` JSON-RPC response body.
+    pub fn parse_send_transaction_response(
+        &self,
+        body: &str,
+    ) -> Result<SendTransactionResult, SdkError> {
+        parse_response(body)
+    }
+
+    /// Parses a raw `getTransaction` JSON-RPC response body.
+    pub fn parse_get_transaction_response(
+        &self,
+        body: &str,
+    ) -> Result<GetTransactionResult, SdkError> {
+        parse_response(body)
+    }
+}
+
+/// Decodes a JSON-RPC response envelope and unwraps either its `result`
+/// or turns a JSON-RPC-level `error` (or malformed body) into an [`SdkError`].
+fn parse_response<T: DeserializeOwned>(body: &str) -> Result<T, SdkError> {
+    let response: JsonRpcResponse<T> =
+        serde_json::from_str(body).map_err(|err| SdkError::RpcError(err.to_string()))?;
+    match response {
+        JsonRpcResponse::Result { result, .. } => Ok(result),
+        JsonRpcResponse::Error { error, .. } => Err(SdkError::RpcError(format!(
+            "{}: {}",
+            error.code, error.message
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum JsonRpcResponse<T> {
+    Result {
+        #[allow(dead_code)]
+        jsonrpc: String,
+        #[allow(dead_code)]
+        id: u32,
+        result: T,
+    },
+    Error {
+        #[allow(dead_code)]
+        jsonrpc: String,
+        #[allow(dead_code)]
+        id: u32,
+        error: JsonRpcError,
+    },
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct JsonRpcError {
+    pub code: i64,
+    pub message: String,
+}
+
+/// The `result` payload of a Soroban `sendTransaction` response.
+/// See <https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/sendTransaction>.
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct SendTransactionResult {
+    pub status: String,
+    pub hash: String,
+    #[serde(rename = "latestLedger")]
+    pub latest_ledger: u32,
+    #[serde(rename = "errorResultXdr")]
+    pub error_result_xdr: Option<String>,
+}
+
+/// The `result` payload of a Soroban `getTransaction` response.
+/// See <https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getTransaction>.
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct GetTransactionResult {
+    pub status: String,
+    #[serde(rename = "latestLedger")]
+    pub latest_ledger: u32,
+    #[serde(rename = "envelopeXdr")]
+    pub envelope_xdr: Option<String>,
+    #[serde(rename = "resultXdr")]
+    pub result_xdr: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -102,5 +185,70 @@ mod tests {
         let value = serde_json::to_value(request).unwrap();
         assert_eq!(value["method"], "getTransaction");
         assert_eq!(value["params"]["hash"], "deadbeef");
+    }
+
+    #[test]
+    fn parses_pending_send_transaction_response() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let body = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "status": "PENDING",
+                "hash": "abcd1234",
+                "latestLedger": 12345,
+                "latestLedgerCloseTime": "1234567890"
+            }
+        }"#;
+
+        let result = client.parse_send_transaction_response(body).unwrap();
+        assert_eq!(result.status, "PENDING");
+        assert_eq!(result.hash, "abcd1234");
+        assert_eq!(result.latest_ledger, 12345);
+        assert_eq!(result.error_result_xdr, None);
+    }
+
+    #[test]
+    fn parses_successful_get_transaction_response() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let body = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "status": "SUCCESS",
+                "latestLedger": 12345,
+                "envelopeXdr": "AAAAAgAAAAA=",
+                "resultXdr": "AAAAAQAAAAA="
+            }
+        }"#;
+
+        let result = client.parse_get_transaction_response(body).unwrap();
+        assert_eq!(result.status, "SUCCESS");
+        assert_eq!(result.envelope_xdr.as_deref(), Some("AAAAAgAAAAA="));
+    }
+
+    #[test]
+    fn maps_json_rpc_error_to_sdk_error() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let body = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": { "code": -32602, "message": "Invalid params" }
+        }"#;
+
+        let err = client.parse_send_transaction_response(body).unwrap_err();
+        match err {
+            SdkError::RpcError(msg) => assert!(msg.contains("Invalid params")),
+            other => panic!("expected RpcError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_malformed_body_to_sdk_error() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let err = client
+            .parse_get_transaction_response("not json")
+            .unwrap_err();
+        assert!(matches!(err, SdkError::RpcError(_)));
     }
 }
