@@ -608,6 +608,51 @@ fn test_verify_offchain_attestation_invalidated_by_onchain_revocation() {
 }
 
 #[test]
+fn test_register_attester_key_requires_auth() {
+    let s = offchain::setup([31u8; 32]);
+
+    // No mock_all_auths and no explicit signature: the attester never
+    // authorized this registration, so it must fail.
+    let res = s
+        .sas_client
+        .try_register_attester_key(&s.attestation.attester, &offchain::public_key(&s));
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_verify_offchain_attestation_via_registered_key() {
+    let s = offchain::setup([31u8; 32]);
+
+    // An attester address whose structure does not encode this signing
+    // key's bytes at all (a freshly generated test address) stands in for
+    // any address kind `attester_matches_key`'s structural XDR check can't
+    // resolve on its own (e.g. a future non-Account `Address` variant).
+    let unresolvable_attester = Address::generate(&s.env);
+    let mut attestation = s.attestation.clone();
+    attestation.attester = unresolvable_attester.clone();
+
+    let signature = offchain::sign(&s, &attestation, 7);
+    let public_key = offchain::public_key(&s);
+
+    // Without registering the key, the structural check has nothing to
+    // fall back on and verification is rejected.
+    let res =
+        s.sas_client
+            .try_verify_offchain_attestation(&attestation, &7, &public_key, &signature);
+    assert!(res.is_err());
+
+    // Once the attester explicitly registers which key backs their
+    // address, the same call succeeds via the registration fallback.
+    s.env.mock_all_auths();
+    s.sas_client
+        .register_attester_key(&unresolvable_attester, &public_key);
+
+    assert!(s
+        .sas_client
+        .verify_offchain_attestation(&attestation, &7, &public_key, &signature));
+}
+
+#[test]
 fn test_comprehensive_lifecycle() {
     let env = Env::default();
     let registry_id = env.register_contract(None, mock1::MockRegistry);

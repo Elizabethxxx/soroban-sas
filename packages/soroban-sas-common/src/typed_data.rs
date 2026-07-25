@@ -117,6 +117,17 @@ const ACCOUNT_ADDRESS_XDR_PREFIX: [u8; 12] = [0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0, 
 /// account address. Contract addresses never match: their id is a SHA-256
 /// output, so an attacker cannot deploy a contract whose address equals a
 /// chosen public key.
+///
+/// This is a structural check scoped to classic Ed25519 accounts: it only
+/// recognizes the `ScAddress::Account` XDR shape this SDK's `stellar-xdr`
+/// version defines. It intentionally cannot resolve any other address kind
+/// (e.g. a future protocol version's multiplexed-account address) — there is
+/// no supported way to derive an `Address` from a raw public key inside a
+/// WASM contract to check structurally. Callers that need to support such
+/// addresses should fall back to an explicit, `require_auth`-gated
+/// registration of the signing key for that address (see
+/// `contracts/sas::register_attester_key`) rather than extending this byte
+/// layout by hand.
 pub fn attester_matches_key(env: &Env, attester: &Address, public_key: &BytesN<32>) -> bool {
     let mut expected = Bytes::from_slice(env, &ACCOUNT_ADDRESS_XDR_PREFIX);
     expected.append(&Bytes::from_slice(env, &public_key.to_array()));
