@@ -17,3 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ed25519 verification utilities in `soroban-sas-common`, a
   `verify_offchain_attestation` entrypoint in the SAS contract, and
   `offchain sign` / `offchain verify` CLI commands.
+
+### Known Issues
+- `SchemaRegistry::deprecate` currently lacks an authorization check.
+- Delegated attest/revoke signatures do not bind the full attestation payload or a nonce, permitting potential replay.

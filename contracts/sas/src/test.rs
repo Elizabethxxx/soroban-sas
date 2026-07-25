@@ -1,8 +1,9 @@
 use crate::{SASClient, SAS};
-use soroban_sas_common::{Attestation, UID};
+use soroban_sas_common::{Attestation, AttestationIssuedEvent, AttestationRevokedEvent, UID};
 use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger;
-use soroban_sdk::{contract, contractimpl, Address, Bytes, Env};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, Env, IntoVal};
 
 pub mod mock1 {
     use super::*;
@@ -646,5 +647,110 @@ fn test_comprehensive_lifecycle() {
     sas_client.revoke(&uid);
 
     // 4. Verify invalid
+    assert!(!sas_client.verify_attestation(&uid));
+}
+
+#[test]
+fn test_attest_emits_attestation_issued_event() {
+    let env = Env::default();
+    let registry_id = env.register_contract(None, mock1::MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let uid = UID(soroban_sdk::BytesN::from_array(&env, &[11u8; 32]));
+    let schema_uid = UID(soroban_sdk::BytesN::from_array(&env, &[2u8; 32]));
+
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: schema_uid.clone(),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID(soroban_sdk::BytesN::from_array(&env, &[0u8; 32])),
+        recipient: recipient.clone(),
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+
+    env.mock_all_auths();
+    sas_client.attest(&attestation);
+
+    let expected = AttestationIssuedEvent {
+        uid: uid.clone(),
+        schema_uid: schema_uid.clone(),
+        attester: attester.clone(),
+        recipient: recipient.clone(),
+    };
+    assert_eq!(
+        env.events().all(),
+        soroban_sdk::vec![
+            &env,
+            (
+                sas_id.clone(),
+                (symbol_short!("ATTESTED"), schema_uid, attester).into_val(&env),
+                expected.into_val(&env),
+            )
+        ]
+    );
+}
+
+#[test]
+fn test_revoke_emits_attestation_revoked_event() {
+    let env = Env::default();
+    let registry_id = env.register_contract(None, mock1::MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+
+    let attester = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let uid = UID(soroban_sdk::BytesN::from_array(&env, &[12u8; 32]));
+
+    let attestation = Attestation {
+        uid: uid.clone(),
+        schema_uid: UID(soroban_sdk::BytesN::from_array(&env, &[2u8; 32])),
+        time: 1000,
+        expiration_time: 0,
+        revocation_time: 0,
+        ref_uid: UID(soroban_sdk::BytesN::from_array(&env, &[0u8; 32])),
+        recipient,
+        attester: attester.clone(),
+        revocable: true,
+        data: Bytes::new(&env),
+    };
+
+    env.mock_all_auths();
+    sas_client.attest(&attestation);
+
+    let revoked_at = 4242u64;
+    env.ledger().with_mut(|li| li.timestamp = revoked_at);
+    sas_client.revoke(&uid);
+
+    let expected = AttestationRevokedEvent {
+        uid: uid.clone(),
+        timestamp: revoked_at,
+    };
+    let events = env.events().all();
+    assert_eq!(
+        events.slice(events.len() - 1..),
+        soroban_sdk::vec![
+            &env,
+            (
+                sas_id.clone(),
+                (symbol_short!("REVOKED"), uid.clone()).into_val(&env),
+                expected.into_val(&env),
+            )
+        ]
+    );
+
+    // Emitted timestamp must match the revocation time written to storage.
     assert!(!sas_client.verify_attestation(&uid));
 }
