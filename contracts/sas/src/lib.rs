@@ -1,9 +1,10 @@
 #![allow(unexpected_cfgs)]
 #![no_std]
 
-use soroban_sas_common::{Attestation, UID};
+use soroban_sas_common::{Attestation, SASError, UID};
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, xdr::ToXdr, Address, Env, IntoVal, Symbol,
+    contract, contractimpl, panic_with_error, symbol_short, xdr::ToXdr, Address, Env, IntoVal,
+    Symbol,
 };
 
 mod events;
@@ -15,6 +16,7 @@ pub struct SAS;
 
 pub const SAS_ADMIN: Symbol = symbol_short!("ADMIN");
 pub const SCHEMA_REGISTRY: Symbol = symbol_short!("REGISTRY");
+pub const ATTESTER_KEY: Symbol = symbol_short!("ATTKEY");
 
 #[contractimpl]
 impl SAS {
@@ -150,6 +152,102 @@ impl SAS {
         for uid in uids.iter() {
             Self::revoke(env.clone(), uid);
         }
+    }
+
+    /// Registers the ed25519 public key that backs `attester`'s Stellar
+    /// account, so `verify_offchain_attestation` can bind signatures to it.
+    ///
+    /// This is only needed as a fallback for attester addresses that
+    /// `soroban_sas_common::attester_matches_key`'s structural XDR check
+    /// cannot resolve on its own — e.g. any future `Address` kind beyond a
+    /// classic Ed25519 account (this SDK's `ScAddress` only has `Account`
+    /// and `Contract` today, but newer Stellar protocol versions add
+    /// multiplexed accounts and other address kinds). Standard account
+    /// attesters do not need to call this at all.
+    ///
+    /// Requires `attester.require_auth()`, so only the address owner can
+    /// bind a key to it.
+    pub fn register_attester_key(env: Env, attester: Address, public_key: soroban_sdk::BytesN<32>) {
+        attester.require_auth();
+        env.storage()
+            .persistent()
+            .set(&(ATTESTER_KEY, attester), &public_key);
+    }
+
+    /// Returns true if `public_key` was explicitly registered for `attester`
+    /// via `register_attester_key`.
+    fn registered_key_matches(
+        env: &Env,
+        attester: &Address,
+        public_key: &soroban_sdk::BytesN<32>,
+    ) -> bool {
+        env.storage()
+            .persistent()
+            .get::<_, soroban_sdk::BytesN<32>>(&(ATTESTER_KEY, attester.clone()))
+            .is_some_and(|registered| registered == *public_key)
+    }
+
+    /// Verifies an off-chain attestation signed by the attester's ed25519 key.
+    ///
+    /// The signed digest commits to the current network id, this contract's
+    /// address, and `nonce` (see `soroban_sas_common::typed_data`), so a
+    /// signature cannot be replayed on another network, against another
+    /// contract, or under a different nonce. Panics if the public key does
+    /// not belong to the declared attester (`SASError::Unauthorized`), if the
+    /// attestation is revoked locally or by an on-chain revocation of the
+    /// same UID (`SASError::AlreadyRevoked`), if it is expired
+    /// (`SASError::AlreadyExpired`), or if the signature is invalid
+    /// (`ed25519_verify` host error).
+    ///
+    /// Key binding is accepted either structurally (the public key derives
+    /// the attester's classic Ed25519 account address) or via an explicit
+    /// `register_attester_key` registration, so attester addresses the
+    /// structural check cannot resolve are not permanently locked out.
+    pub fn verify_offchain_attestation(
+        env: Env,
+        attestation: Attestation,
+        nonce: u64,
+        public_key: soroban_sdk::BytesN<32>,
+        signature: soroban_sdk::BytesN<64>,
+    ) -> bool {
+        let key_matches =
+            soroban_sas_common::attester_matches_key(&env, &attestation.attester, &public_key)
+                || Self::registered_key_matches(&env, &attestation.attester, &public_key);
+        if !key_matches {
+            panic_with_error!(&env, SASError::Unauthorized);
+        }
+
+        if attestation.revocation_time != 0 {
+            panic_with_error!(&env, SASError::AlreadyRevoked);
+        }
+        if attestation.expiration_time != 0
+            && env.ledger().timestamp() >= attestation.expiration_time
+        {
+            panic_with_error!(&env, SASError::AlreadyExpired);
+        }
+
+        // An on-chain revocation of the same UID also invalidates the
+        // off-chain copy.
+        if let Some(stored) = env
+            .storage()
+            .persistent()
+            .get::<_, Attestation>(&attestation.uid)
+        {
+            if stored.revocation_time != 0 {
+                panic_with_error!(&env, SASError::AlreadyRevoked);
+            }
+        }
+
+        let domain = soroban_sas_common::AttestationDomain {
+            network_id: env.ledger().network_id(),
+            contract: env.current_contract_address(),
+            nonce,
+        };
+        let payload_hash =
+            soroban_sas_common::hash_offchain_attestation(&env, &attestation, &domain);
+        soroban_sas_common::verify_offchain_signature(&env, &payload_hash, &public_key, &signature);
+
+        true
     }
 
     pub fn verify_attestation(env: Env, uid: UID) -> bool {
