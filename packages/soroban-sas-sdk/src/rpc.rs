@@ -65,6 +65,42 @@ impl RpcClient {
         parse_response(body)
     }
 
+    /// Builds the JSON-RPC request body for Soroban's `simulateTransaction`,
+    /// used for read-only contract calls (dry-run, no signature required).
+    pub fn build_simulate_transaction_request(
+        &self,
+        tx_envelope_xdr: &str,
+    ) -> JsonRpcRequest<SimulateTransactionParams> {
+        JsonRpcRequest::new(
+            "simulateTransaction",
+            SimulateTransactionParams {
+                transaction: tx_envelope_xdr.to_string(),
+            },
+        )
+    }
+
+    /// Parses a raw `simulateTransaction` JSON-RPC response body.
+    pub fn parse_simulate_transaction_response(
+        &self,
+        body: &str,
+    ) -> Result<SimulateTransactionResult, SdkError> {
+        parse_response(body)
+    }
+
+    /// Simulates invoking a contract via `tx_envelope_xdr` (built by
+    /// `soroban_sas_sdk::simulate::build_invoke_transaction_xdr`) and parses
+    /// the response. Returns `Ok` even when the simulation itself failed
+    /// (check `SimulateTransactionResult::error`) — only transport/parsing
+    /// failures are `Err`.
+    pub fn simulate_transaction(
+        &self,
+        tx_envelope_xdr: &str,
+    ) -> Result<SimulateTransactionResult, SdkError> {
+        let request = self.build_simulate_transaction_request(tx_envelope_xdr);
+        let body = self.post(&request)?;
+        self.parse_simulate_transaction_response(&body)
+    }
+
     /// Submits `tx_envelope_xdr` to this RPC endpoint's `sendTransaction`
     /// method and parses the response.
     pub fn send_transaction(
@@ -188,6 +224,36 @@ pub struct GetTransactionParams {
     pub hash: String,
 }
 
+#[derive(Debug, Serialize, PartialEq)]
+pub struct SimulateTransactionParams {
+    pub transaction: String,
+}
+
+/// The `result` payload of a Soroban `simulateTransaction` response.
+/// See <https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/simulateTransaction>.
+///
+/// A simulation failure (e.g. the invoked contract traps) is reported via
+/// `error`, not a JSON-RPC-level error — `results` is empty in that case.
+/// Verified against live `soroban-testnet.stellar.org`: a well-formed call
+/// to a nonexistent contract instance returns
+/// `{"error": "HostError: Error(Storage, MissingValue)...", "latestLedger": ...}`
+/// with no `results` field at all, which `#[serde(default)]` handles.
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct SimulateTransactionResult {
+    #[serde(rename = "latestLedger")]
+    pub latest_ledger: u32,
+    pub error: Option<String>,
+    #[serde(default)]
+    pub results: Vec<SimulateHostFunctionResult>,
+}
+
+/// One entry of a successful simulation's `results` array — the return
+/// value of the invoked function, base64-encoded `ScVal` XDR.
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct SimulateHostFunctionResult {
+    pub xdr: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +333,61 @@ mod tests {
             SdkError::RpcError(msg) => assert!(msg.contains("Invalid params")),
             other => panic!("expected RpcError, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn builds_simulate_transaction_request() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let request = client.build_simulate_transaction_request("AAAAAgAAAAA=");
+
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["method"], "simulateTransaction");
+        assert_eq!(value["params"]["transaction"], "AAAAAgAAAAA=");
+    }
+
+    #[test]
+    fn parses_successful_simulate_transaction_response() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let body = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "latestLedger": 3993006,
+                "results": [
+                    { "auth": [], "xdr": "AAAAAA==" }
+                ]
+            }
+        }"#;
+
+        let result = client.parse_simulate_transaction_response(body).unwrap();
+        assert_eq!(result.latest_ledger, 3993006);
+        assert_eq!(result.error, None);
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].xdr, "AAAAAA==");
+    }
+
+    /// Captured verbatim (aside from truncating the diagnostic event log)
+    /// from a real call to `soroban-testnet.stellar.org`, simulating an
+    /// `InvokeHostFunction` against a syntactically valid but undeployed
+    /// contract address — confirms this is really how a failed simulation
+    /// is shaped on the wire, not just what the docs say.
+    #[test]
+    fn parses_a_failed_simulate_transaction_response_from_live_testnet() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let body = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "error": "HostError: Error(Storage, MissingValue)\n\nEvent log (newest first):\n   0: [Diagnostic Event] topics:[error, Error(Storage, MissingValue)], data:\"trying to get non-existing value for contract instance\"\n",
+                "events": ["AAAAAA==", "AAAAAA=="],
+                "latestLedger": 3993006
+            }
+        }"#;
+
+        let result = client.parse_simulate_transaction_response(body).unwrap();
+        assert_eq!(result.latest_ledger, 3993006);
+        assert!(result.error.unwrap().contains("MissingValue"));
+        assert!(result.results.is_empty());
     }
 
     #[test]

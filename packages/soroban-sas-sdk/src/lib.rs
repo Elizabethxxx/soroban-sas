@@ -13,6 +13,7 @@ pub mod attestation_builder;
 pub mod batch;
 pub mod rpc;
 pub mod signature;
+pub mod simulate;
 pub mod transaction;
 
 pub mod errors;
