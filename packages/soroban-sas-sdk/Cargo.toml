@@ -8,6 +8,7 @@ soroban-sdk = { workspace = true }
 soroban-sas-common = { path = "../soroban-sas-common" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

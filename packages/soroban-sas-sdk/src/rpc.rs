@@ -1,11 +1,8 @@
-//! Soroban RPC client scaffolding.
+//! Soroban RPC client.
 //!
-//! This does not perform network I/O yet — it builds well-typed JSON-RPC
-//! request bodies for the Soroban RPC methods the SDK will need to submit
-//! and track transactions, and parses the matching JSON-RPC responses.
-//! Wiring an actual HTTP transport is a follow-up (deliberately deferred:
-//! it's a separate dependency decision, e.g. which HTTP client / TLS stack
-//! to pull in).
+//! Builds well-typed JSON-RPC request bodies for the Soroban RPC methods the
+//! SDK needs to submit and track transactions, sends them over HTTP via
+//! `ureq`, and parses the matching JSON-RPC responses.
 
 use crate::errors::SdkError;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -66,6 +63,35 @@ impl RpcClient {
         body: &str,
     ) -> Result<GetTransactionResult, SdkError> {
         parse_response(body)
+    }
+
+    /// Submits `tx_envelope_xdr` to this RPC endpoint's `sendTransaction`
+    /// method and parses the response.
+    pub fn send_transaction(
+        &self,
+        tx_envelope_xdr: &str,
+    ) -> Result<SendTransactionResult, SdkError> {
+        let request = self.build_send_transaction_request(tx_envelope_xdr);
+        let body = self.post(&request)?;
+        self.parse_send_transaction_response(&body)
+    }
+
+    /// Fetches the current status of `tx_hash` via this RPC endpoint's
+    /// `getTransaction` method and parses the response.
+    pub fn get_transaction(&self, tx_hash: &str) -> Result<GetTransactionResult, SdkError> {
+        let request = self.build_get_transaction_request(tx_hash);
+        let body = self.post(&request)?;
+        self.parse_get_transaction_response(&body)
+    }
+
+    /// POSTs a JSON-RPC request body to this client's `network_url` and
+    /// returns the raw response body.
+    fn post<P: Serialize>(&self, request: &JsonRpcRequest<P>) -> Result<String, SdkError> {
+        ureq::post(&self.network_url)
+            .send_json(request)
+            .map_err(|err| SdkError::RpcError(err.to_string()))?
+            .into_string()
+            .map_err(|err| SdkError::RpcError(err.to_string()))
     }
 }
 
