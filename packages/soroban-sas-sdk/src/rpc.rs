@@ -88,8 +88,9 @@ impl RpcClient {
     }
 
     /// Simulates invoking a contract via `tx_envelope_xdr` (built by
-    /// `soroban_sas_sdk::simulate::build_invoke_transaction_xdr`) and parses
-    /// the response. Returns `Ok` even when the simulation itself failed
+    /// `soroban_sas_sdk::simulate::build_simulate_transaction_xdr` or
+    /// `simulate::unsigned_envelope_xdr`) and parses the response. Returns
+    /// `Ok` even when the simulation itself failed
     /// (check `SimulateTransactionResult::error`) — only transport/parsing
     /// failures are `Err`.
     pub fn simulate_transaction(
@@ -118,6 +119,34 @@ impl RpcClient {
         let request = self.build_get_transaction_request(tx_hash);
         let body = self.post(&request)?;
         self.parse_get_transaction_response(&body)
+    }
+
+    /// Builds the JSON-RPC request body for Soroban's `getLedgerEntries`.
+    /// `keys` are base64-encoded `LedgerKey` XDR.
+    pub fn build_get_ledger_entries_request(
+        &self,
+        keys: Vec<String>,
+    ) -> JsonRpcRequest<GetLedgerEntriesParams> {
+        JsonRpcRequest::new("getLedgerEntries", GetLedgerEntriesParams { keys })
+    }
+
+    /// Parses a raw `getLedgerEntries` JSON-RPC response body.
+    pub fn parse_get_ledger_entries_response(
+        &self,
+        body: &str,
+    ) -> Result<GetLedgerEntriesResult, SdkError> {
+        parse_response(body)
+    }
+
+    /// Fetches the ledger entries for `keys` (base64-encoded `LedgerKey`
+    /// XDR) and parses the response.
+    pub fn get_ledger_entries(
+        &self,
+        keys: Vec<String>,
+    ) -> Result<GetLedgerEntriesResult, SdkError> {
+        let request = self.build_get_ledger_entries_request(keys);
+        let body = self.post(&request)?;
+        self.parse_get_ledger_entries_response(&body)
     }
 
     /// POSTs a JSON-RPC request body to this client's `network_url` and
@@ -245,6 +274,15 @@ pub struct SimulateTransactionResult {
     pub error: Option<String>,
     #[serde(default)]
     pub results: Vec<SimulateHostFunctionResult>,
+    /// Base64 `SorobanTransactionData` XDR, present only on success — the
+    /// resource footprint/limits a real submission must carry in its
+    /// `TransactionExt::V1` to be accepted by the network.
+    #[serde(rename = "transactionData")]
+    pub transaction_data: Option<String>,
+    /// Stroops, present only on success — added to the classic per-operation
+    /// fee to get a real submission's total `fee`.
+    #[serde(rename = "minResourceFee")]
+    pub min_resource_fee: Option<String>,
 }
 
 /// One entry of a successful simulation's `results` array — the return
@@ -252,6 +290,30 @@ pub struct SimulateTransactionResult {
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct SimulateHostFunctionResult {
     pub xdr: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct GetLedgerEntriesParams {
+    pub keys: Vec<String>,
+}
+
+/// The `result` payload of a Soroban `getLedgerEntries` response.
+/// See <https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getLedgerEntries>.
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct GetLedgerEntriesResult {
+    #[serde(default)]
+    pub entries: Vec<LedgerEntryResult>,
+    #[serde(rename = "latestLedger")]
+    pub latest_ledger: u32,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct LedgerEntryResult {
+    pub key: String,
+    /// Base64 `LedgerEntryData` XDR.
+    pub xdr: String,
+    #[serde(rename = "lastModifiedLedgerSeq")]
+    pub last_modified_ledger_seq: u32,
 }
 
 #[cfg(test)]
@@ -388,6 +450,36 @@ mod tests {
         assert_eq!(result.latest_ledger, 3993006);
         assert!(result.error.unwrap().contains("MissingValue"));
         assert!(result.results.is_empty());
+    }
+
+    #[test]
+    fn builds_get_ledger_entries_request() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let request = client.build_get_ledger_entries_request(vec!["AAAAAA==".to_string()]);
+
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["method"], "getLedgerEntries");
+        assert_eq!(value["params"]["keys"][0], "AAAAAA==");
+    }
+
+    #[test]
+    fn parses_get_ledger_entries_response() {
+        let client = RpcClient::new("https://soroban-testnet.stellar.org");
+        let body = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "entries": [
+                    { "key": "AAAAAA==", "xdr": "AAAAAA==", "lastModifiedLedgerSeq": 3993006 }
+                ],
+                "latestLedger": 3993006
+            }
+        }"#;
+
+        let result = client.parse_get_ledger_entries_response(body).unwrap();
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].xdr, "AAAAAA==");
+        assert_eq!(result.entries[0].last_modified_ledger_seq, 3993006);
     }
 
     #[test]

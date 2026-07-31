@@ -5,6 +5,7 @@
 //! This library provides strong types, builder patterns, and RPC integration
 //! for interacting with the Soroban Attestation Service (SAS).
 
+pub mod account;
 pub mod client;
 pub mod schema_builder;
 
