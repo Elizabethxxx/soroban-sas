@@ -10,6 +10,7 @@ hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 soroban-sas-common = { path = "../soroban-sas-common" }
+soroban-sas-sdk = { path = "../soroban-sas-sdk" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 stellar-strkey = "0.0.8"
 

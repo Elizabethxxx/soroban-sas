@@ -8,7 +8,7 @@ use crate::simulate;
 use crate::transaction::TransactionSubmitter;
 use soroban_sas_common::{Attestation, SchemaRecord, UID};
 use soroban_sdk::xdr::{Limits, ReadXdr, ScVal, SorobanTransactionData, TransactionExt};
-use soroban_sdk::{Bytes, BytesN, Env};
+use soroban_sdk::{Address, Bytes, BytesN, Env, String as SorobanString};
 use std::time::Duration;
 
 /// Classic per-operation fee, in stroops, before the Soroban resource fee
@@ -58,6 +58,47 @@ impl SASClient {
         let uid = UID(BytesN::from_array(env, uid));
         let arg = simulate::encode_arg(env, &uid)?;
         invoke_read_only(env, rpc, registry_contract_id, "get_schema", vec![arg])
+    }
+
+    /// Calls `SchemaRegistry::register(owner, schema, resolver, revocable)`
+    /// on `registry_contract_id`, same signing/submission flow as `attest`.
+    ///
+    /// `owner` is derived from `secret_seed`, not taken as a parameter:
+    /// `register` requires `owner.require_auth()`, so it must be the same
+    /// account as the transaction's signer (see `attest`'s doc comment).
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_schema(
+        &self,
+        env: &Env,
+        rpc: &RpcClient,
+        network_passphrase: &str,
+        secret_seed: &[u8; 32],
+        registry_contract_id: &str,
+        schema: &str,
+        resolver: &str,
+        revocable: bool,
+    ) -> Result<GetTransactionResult, SdkError> {
+        let owner_public_key = signature::derive_public_key(secret_seed);
+        let owner_strkey = stellar_strkey::ed25519::PublicKey(owner_public_key).to_string();
+        let owner = Address::from_string(&SorobanString::from_str(env, &owner_strkey));
+        let resolver = Address::from_string(&SorobanString::from_str(env, resolver));
+        let schema = SorobanString::from_str(env, schema);
+
+        let args = vec![
+            simulate::encode_arg(env, &owner)?,
+            simulate::encode_arg(env, &schema)?,
+            simulate::encode_arg(env, &resolver)?,
+            simulate::encode_arg(env, &revocable)?,
+        ];
+        invoke_write(
+            env,
+            rpc,
+            network_passphrase,
+            secret_seed,
+            registry_contract_id,
+            "register",
+            args,
+        )
     }
 
     /// Calls `SAS::attest(attestation)`: builds the invoke transaction,

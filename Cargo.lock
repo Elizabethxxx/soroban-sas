@@ -1315,6 +1315,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soroban-sas-common",
+ "soroban-sas-sdk",
  "soroban-sdk",
  "stellar-strkey",
 ]
