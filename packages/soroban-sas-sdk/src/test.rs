@@ -2,7 +2,10 @@
 mod tests {
     #[test]
     fn test_signature_generation() {
-        assert_eq!(crate::signature::generate_delegated_signature().len(), 64);
+        let seed = [1u8; 32];
+        let signature = crate::signature::generate_delegated_signature(&seed, b"message");
+        assert_eq!(signature.len(), 64);
+        assert_ne!(signature, [0u8; 64]);
     }
 }
 

@@ -79,16 +79,53 @@ enum OffchainCommands {
 
 #[derive(Subcommand)]
 enum SchemaCommands {
-    /// Register a new schema
+    /// Register a new schema. The registration is signed and submitted by
+    /// --secret-key's account, which becomes the schema's owner.
     Register {
-        #[arg(long)]
+        #[arg(long, help = "Schema definition string")]
         schema: String,
+        #[arg(
+            long,
+            help = "Resolver contract address (C...) invoked on attest/revoke"
+        )]
+        resolver: String,
+        #[arg(long, help = "Whether attestations against this schema can be revoked")]
+        revocable: bool,
+        #[arg(
+            long,
+            help = "Owner's signing key: S... strkey seed or 32-byte hex seed",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(
+            long,
+            help = "Network passphrase to sign against",
+            env = "SOROBAN_NETWORK_PASSPHRASE"
+        )]
+        network_passphrase: String,
+        #[arg(
+            long,
+            help = "Schema Registry contract address (C...)",
+            env = "SCHEMA_REGISTRY_CONTRACT_ID"
+        )]
+        registry_contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
     },
     /// Get an existing schema by UID
     Get {
-        #[arg(long)]
+        #[arg(long, help = "32-byte schema UID, hex encoded")]
         uid: String,
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Schema Registry contract address (C...)",
+            env = "SCHEMA_REGISTRY_CONTRACT_ID"
+        )]
+        registry_contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+        #[arg(long, help = "Print raw JSON instead of a human-readable summary")]
         json: bool,
     },
 }
@@ -128,15 +165,112 @@ enum QueryCommands {
 
 fn main() {
     let cli = Cli::parse();
-    match cli.command {
-        Some(Commands::Offchain { action }) => {
-            if let Err(err) = run_offchain(action) {
-                eprintln!("error: {err}");
-                std::process::exit(1);
-            }
+    let result = match cli.command {
+        Some(Commands::Offchain { action }) => run_offchain(action),
+        Some(Commands::Schema { action }) => run_schema(action),
+        _ => {
+            println!("CLI initialized");
+            Ok(())
         }
-        _ => println!("CLI initialized"),
+    };
+    if let Err(err) = result {
+        eprintln!("error: {err}");
+        std::process::exit(1);
     }
+}
+
+fn run_schema(action: SchemaCommands) -> Result<(), String> {
+    let env = soroban_sdk::Env::default();
+    match action {
+        SchemaCommands::Register {
+            schema,
+            resolver,
+            revocable,
+            secret_key,
+            network_passphrase,
+            registry_contract_id,
+            rpc_url,
+        } => {
+            let seed = offchain::parse_secret_seed(&secret_key)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(registry_contract_id.clone());
+            let result = client
+                .register_schema(
+                    &env,
+                    &rpc,
+                    &network_passphrase,
+                    &seed,
+                    &registry_contract_id,
+                    &schema,
+                    &resolver,
+                    revocable,
+                )
+                .map_err(|e| format!("{e:?}"))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "status": result.status,
+                    "envelopeXdr": result.envelope_xdr,
+                    "resultXdr": result.result_xdr,
+                }))
+                .map_err(|e| format!("serialization failed: {e}"))?
+            );
+            Ok(())
+        }
+        SchemaCommands::Get {
+            uid,
+            registry_contract_id,
+            rpc_url,
+            json,
+        } => {
+            let uid_bytes: [u8; 32] = hex::decode(uid.trim_start_matches("0x"))
+                .map_err(|e| format!("invalid hex in uid: {e}"))?
+                .try_into()
+                .map_err(|_| "uid must be exactly 32 bytes".to_string())?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(registry_contract_id.clone());
+            let schema = client
+                .get_schema(&env, &rpc, &registry_contract_id, &uid_bytes)
+                .map_err(|e| format!("{e:?}"))?;
+
+            match schema {
+                None => {
+                    println!("Schema not found");
+                }
+                Some(record) => {
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "uid": hex::encode(record.uid.0.to_array()),
+                                "resolver": soroban_string_to_std(&record.resolver.to_string()),
+                                "revocable": record.revocable,
+                                "schema": soroban_string_to_std(&record.schema),
+                            }))
+                            .map_err(|e| format!("serialization failed: {e}"))?
+                        );
+                    } else {
+                        println!("uid:       {}", hex::encode(record.uid.0.to_array()));
+                        println!(
+                            "resolver:  {}",
+                            soroban_string_to_std(&record.resolver.to_string())
+                        );
+                        println!("revocable: {}", record.revocable);
+                        println!("schema:    {}", soroban_string_to_std(&record.schema));
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// `soroban_sdk::String` (a host value) doesn't implement `Display` off-chain
+/// — this copies it into a UTF-8 `std::String` for printing.
+fn soroban_string_to_std(s: &soroban_sdk::String) -> String {
+    let mut buf = vec![0u8; s.len() as usize];
+    s.copy_into_slice(&mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 fn run_offchain(action: OffchainCommands) -> Result<(), String> {
