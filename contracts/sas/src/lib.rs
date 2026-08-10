@@ -3,8 +3,7 @@
 
 use soroban_sas_common::{Attestation, SASError, UID};
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, symbol_short, xdr::ToXdr, Address, Env, IntoVal,
-    Symbol,
+    contract, contractimpl, panic_with_error, symbol_short, Address, Env, IntoVal, Symbol,
 };
 
 mod events;
@@ -17,6 +16,7 @@ pub struct SAS;
 pub const SAS_ADMIN: Symbol = symbol_short!("ADMIN");
 pub const SCHEMA_REGISTRY: Symbol = symbol_short!("REGISTRY");
 pub const ATTESTER_KEY: Symbol = symbol_short!("ATTKEY");
+pub const DELEGATION_NONCE: Symbol = symbol_short!("DELNONCE");
 
 #[contractimpl]
 impl SAS {
@@ -36,15 +36,23 @@ impl SAS {
     pub fn attest_by_delegation(
         env: Env,
         attestation: Attestation,
+        nonce: u64,
         signature: soroban_sdk::BytesN<64>,
         public_key: soroban_sdk::BytesN<32>,
     ) -> UID {
-        let mut payload = soroban_sdk::Bytes::new(&env);
-        payload.append(&attestation.schema_uid.clone().0.into());
-        payload.append(&attestation.recipient.clone().to_xdr(&env));
-
-        env.crypto()
-            .ed25519_verify(&public_key, &payload, &signature);
+        if attestation.revocation_time != 0 {
+            panic_with_error!(&env, SASError::AlreadyRevoked);
+        }
+        Self::require_attester_key(&env, &attestation.attester, &public_key);
+        let domain = soroban_sas_common::AttestationDomain {
+            network_id: env.ledger().network_id(),
+            contract: env.current_contract_address(),
+            nonce,
+        };
+        let payload_hash =
+            soroban_sas_common::hash_offchain_attestation(&env, &attestation, &domain);
+        soroban_sas_common::verify_offchain_signature(&env, &payload_hash, &public_key, &signature);
+        Self::consume_delegation_nonce(&env, &attestation.attester, nonce);
 
         Self::attest_internal(env, attestation)
     }
@@ -94,14 +102,29 @@ impl SAS {
     pub fn revoke_by_delegation(
         env: Env,
         uid: UID,
+        nonce: u64,
         signature: soroban_sdk::BytesN<64>,
         public_key: soroban_sdk::BytesN<32>,
     ) {
-        let mut payload = soroban_sdk::Bytes::new(&env);
-        payload.append(&uid.clone().0.into());
-
-        env.crypto()
-            .ed25519_verify(&public_key, &payload, &signature);
+        let attestation: Attestation = env
+            .storage()
+            .persistent()
+            .get(&uid)
+            .expect("Attestation not found");
+        Self::require_attester_key(&env, &attestation.attester, &public_key);
+        let domain = soroban_sas_common::AttestationDomain {
+            network_id: env.ledger().network_id(),
+            contract: env.current_contract_address(),
+            nonce,
+        };
+        let payload_hash = soroban_sas_common::hash_delegated_revocation(
+            &env,
+            &uid,
+            &attestation.attester,
+            &domain,
+        );
+        soroban_sas_common::verify_offchain_signature(&env, &payload_hash, &public_key, &signature);
+        Self::consume_delegation_nonce(&env, &attestation.attester, nonce);
 
         Self::revoke_internal(env, uid)
     }
@@ -187,6 +210,22 @@ impl SAS {
             .is_some_and(|registered| registered == *public_key)
     }
 
+    fn require_attester_key(env: &Env, attester: &Address, public_key: &soroban_sdk::BytesN<32>) {
+        if !soroban_sas_common::attester_matches_key(env, attester, public_key)
+            && !Self::registered_key_matches(env, attester, public_key)
+        {
+            panic_with_error!(env, SASError::Unauthorized);
+        }
+    }
+
+    fn consume_delegation_nonce(env: &Env, attester: &Address, nonce: u64) {
+        let key = (DELEGATION_NONCE, attester.clone(), nonce);
+        if env.storage().persistent().has(&key) {
+            panic_with_error!(env, SASError::DelegationReplay);
+        }
+        env.storage().persistent().set(&key, &true);
+    }
+
     /// Verifies an off-chain attestation signed by the attester's ed25519 key.
     ///
     /// The signed digest commits to the current network id, this contract's
@@ -210,12 +249,7 @@ impl SAS {
         public_key: soroban_sdk::BytesN<32>,
         signature: soroban_sdk::BytesN<64>,
     ) -> bool {
-        let key_matches =
-            soroban_sas_common::attester_matches_key(&env, &attestation.attester, &public_key)
-                || Self::registered_key_matches(&env, &attestation.attester, &public_key);
-        if !key_matches {
-            panic_with_error!(&env, SASError::Unauthorized);
-        }
+        Self::require_attester_key(&env, &attestation.attester, &public_key);
 
         if attestation.revocation_time != 0 {
             panic_with_error!(&env, SASError::AlreadyRevoked);

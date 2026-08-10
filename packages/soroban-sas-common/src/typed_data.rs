@@ -26,6 +26,10 @@ pub const DOMAIN_TYPE_TAG: &[u8] = b"SorobanSAS Domain v1(network_id,contract,no
 pub const ATTESTATION_TYPE_TAG: &[u8] =
     b"SorobanSAS Attestation v1(uid,schema_uid,time,expiration_time,ref_uid,recipient,attester,revocable,data)";
 
+/// Type tag for a delegated revocation. This differs from the attestation
+/// tag so a signature for one action can never authorize the other.
+pub const DELEGATED_REVOCATION_TYPE_TAG: &[u8] = b"SorobanSAS DelegatedRevocation v1(uid,attester)";
+
 /// Domain separator binding a signature to one network, contract, and nonce.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,6 +93,25 @@ pub fn hash_offchain_attestation(
         env,
         &hash_attestation_struct(env, attestation).to_array(),
     ));
+    env.crypto().sha256(&buf)
+}
+
+/// Computes the digest for a delegated on-chain revocation. The domain binds
+/// the action to one network, one SAS contract, and one nonce; the body binds
+/// it to the exact attestation UID and its recorded attester.
+pub fn hash_delegated_revocation(
+    env: &Env,
+    uid: &crate::UID,
+    attester: &Address,
+    domain: &AttestationDomain,
+) -> BytesN<32> {
+    let mut buf = Bytes::from_slice(env, DELEGATED_REVOCATION_TYPE_TAG);
+    buf.append(&Bytes::from_slice(
+        env,
+        &hash_domain(env, domain).to_array(),
+    ));
+    buf.append(&Bytes::from_slice(env, &uid.0.to_array()));
+    buf.append(&attester.clone().to_xdr(env));
     env.crypto().sha256(&buf)
 }
 

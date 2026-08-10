@@ -1,9 +1,13 @@
 use crate::{SASClient, SAS};
-use soroban_sas_common::{Attestation, AttestationIssuedEvent, AttestationRevokedEvent, UID};
+use ed25519_dalek::{Signer, SigningKey};
+use soroban_sas_common::{
+    hash_delegated_revocation, Attestation, AttestationDomain, AttestationIssuedEvent,
+    AttestationRevokedEvent, UID,
+};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger;
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, Env, IntoVal};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, IntoVal};
 
 pub mod mock1 {
     use super::*;
@@ -446,7 +450,9 @@ fn test_attest_by_delegation() {
 mod offchain {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
-    use soroban_sas_common::{hash_offchain_attestation, AttestationDomain};
+    use soroban_sas_common::{
+        hash_delegated_revocation, hash_offchain_attestation, AttestationDomain,
+    };
     use soroban_sdk::{BytesN, String as SorobanString};
 
     pub struct Setup {
@@ -507,6 +513,109 @@ mod offchain {
     pub fn public_key(setup: &Setup) -> BytesN<32> {
         BytesN::from_array(&setup.env, &setup.signing_key.verifying_key().to_bytes())
     }
+
+    pub fn sign_revocation(setup: &Setup, uid: &UID, nonce: u64) -> BytesN<64> {
+        let domain = AttestationDomain {
+            network_id: setup.env.ledger().network_id(),
+            contract: setup.sas_id.clone(),
+            nonce,
+        };
+        let payload_hash =
+            hash_delegated_revocation(&setup.env, uid, &setup.attestation.attester, &domain);
+        let signature = setup.signing_key.sign(&payload_hash.to_array());
+        BytesN::from_array(&setup.env, &signature.to_bytes())
+    }
+}
+
+#[test]
+fn test_delegated_attestation_binds_full_payload_and_nonce() {
+    let s = offchain::setup([41u8; 32]);
+    let nonce = 7;
+    let signature = offchain::sign(&s, &s.attestation, nonce);
+    let public_key = offchain::public_key(&s);
+
+    // Same schema and recipient as the signed payload, but different data:
+    // the legacy implementation accepted this mutation.
+    let mut tampered = s.attestation.clone();
+    tampered.data = Bytes::from_slice(&s.env, &[9, 9, 9]);
+    let res = s
+        .sas_client
+        .try_attest_by_delegation(&tampered, &nonce, &signature, &public_key);
+    assert!(res.is_err());
+
+    // A failed verification must not consume the nonce; the original signed
+    // action remains valid exactly once.
+    assert_eq!(
+        s.sas_client
+            .attest_by_delegation(&s.attestation, &nonce, &signature, &public_key),
+        s.attestation.uid
+    );
+    let replay =
+        s.sas_client
+            .try_attest_by_delegation(&s.attestation, &nonce, &signature, &public_key);
+    assert!(replay.is_err());
+}
+
+#[test]
+fn test_delegated_revoke_binds_attester_and_nonce() {
+    let s = offchain::setup([42u8; 32]);
+    let issue_nonce = 1;
+    let issue_signature = offchain::sign(&s, &s.attestation, issue_nonce);
+    let public_key = offchain::public_key(&s);
+    s.sas_client
+        .attest_by_delegation(&s.attestation, &issue_nonce, &issue_signature, &public_key);
+
+    let revoke_nonce = 2;
+    let revoke_signature = offchain::sign_revocation(&s, &s.attestation.uid, revoke_nonce);
+    s.env.ledger().with_mut(|li| li.timestamp = 100);
+    s.sas_client.revoke_by_delegation(
+        &s.attestation.uid,
+        &revoke_nonce,
+        &revoke_signature,
+        &public_key,
+    );
+    assert!(!s.sas_client.verify_attestation(&s.attestation.uid));
+
+    let replay = s.sas_client.try_revoke_by_delegation(
+        &s.attestation.uid,
+        &revoke_nonce,
+        &revoke_signature,
+        &public_key,
+    );
+    assert!(replay.is_err());
+}
+
+#[test]
+fn test_delegated_revoke_rejects_a_different_attesters_key() {
+    let s = offchain::setup([43u8; 32]);
+    let issue_nonce = 1;
+    let issue_signature = offchain::sign(&s, &s.attestation, issue_nonce);
+    s.sas_client.attest_by_delegation(
+        &s.attestation,
+        &issue_nonce,
+        &issue_signature,
+        &offchain::public_key(&s),
+    );
+
+    let other_key = SigningKey::from_bytes(&[44u8; 32]);
+    let other_public_key = BytesN::from_array(&s.env, &other_key.verifying_key().to_bytes());
+    let domain = AttestationDomain {
+        network_id: s.env.ledger().network_id(),
+        contract: s.sas_id.clone(),
+        nonce: 2,
+    };
+    let payload_hash =
+        hash_delegated_revocation(&s.env, &s.attestation.uid, &s.attestation.attester, &domain);
+    let signature =
+        BytesN::from_array(&s.env, &other_key.sign(&payload_hash.to_array()).to_bytes());
+
+    let res = s.sas_client.try_revoke_by_delegation(
+        &s.attestation.uid,
+        &2,
+        &signature,
+        &other_public_key,
+    );
+    assert!(res.is_err());
 }
 
 #[test]

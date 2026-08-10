@@ -18,6 +18,7 @@ pub enum SASError {
     /// Authorization errors
     Unauthorized = 301,
     InvalidSignature = 302,
+    DelegationReplay = 303,
 
     /// Input validation errors
     InvalidTTL = 401,
