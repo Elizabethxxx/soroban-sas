@@ -44,8 +44,23 @@ impl SchemaRegistry {
         // Native token transfer logic goes here
     }
 
-    pub fn deprecate(env: Env, uid: UID) {
-        // Typically require creator auth, skipping for brevity
+    /// Deprecates a schema. Only its original registrant or the registry
+    /// administrator may authorize this operation.
+    pub fn deprecate(env: Env, uid: UID, authorizer: Address) {
+        authorizer.require_auth();
+
+        let admin: Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
+        let creator: Option<Address> = env
+            .storage()
+            .persistent()
+            .get(&(SCHEMA_CREATOR, uid.clone()));
+        // Schemas registered before creator tracking was introduced have no
+        // mapping. The registry admin remains able to deprecate those legacy
+        // records; new records also permit their creator.
+        if authorizer != admin && creator.as_ref() != Some(&authorizer) {
+            panic!("Unauthorized schema deprecation");
+        }
+
         env.storage().persistent().set(&(DEPRECATED, uid), &true);
     }
 
@@ -77,6 +92,9 @@ impl SchemaRegistry {
             schema,
         };
         env.storage().persistent().set(&uid, &record);
+        env.storage()
+            .persistent()
+            .set(&(SCHEMA_CREATOR, uid.clone()), &owner);
 
         let mut count: u32 = env.storage().persistent().get(&SCHEMA_COUNT).unwrap_or(0);
         env.storage().persistent().set(&count, &uid);

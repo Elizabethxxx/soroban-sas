@@ -114,21 +114,61 @@ fn test_deprecate() {
     let contract_id = env.register_contract(None, SchemaRegistry);
     let client = SchemaRegistryClient::new(&env, &contract_id);
 
+    let admin = Address::generate(&env);
     let owner = Address::generate(&env);
     let schema_str = String::from_str(&env, "bool like_soroban");
     let resolver = Address::generate(&env);
 
     env.mock_all_auths();
+    client.init(&admin);
     let uid = client.register(&owner, &schema_str, &resolver, &true);
 
     // Check it's active
     assert!(client.get_schema(&uid).is_some());
 
     // Deprecate
-    client.deprecate(&uid);
+    client.deprecate(&uid, &owner);
 
     // Check it's no longer active
     assert!(client.get_schema(&uid).is_none());
+}
+
+#[test]
+fn test_deprecate_by_admin() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let schema_str = String::from_str(&env, "bool like_soroban");
+    let resolver = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.init(&admin);
+    let uid = client.register(&owner, &schema_str, &resolver, &true);
+    client.deprecate(&uid, &admin);
+
+    assert!(client.get_schema(&uid).is_none());
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized schema deprecation")]
+fn test_deprecate_rejects_unrelated_authorizer() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, SchemaRegistry);
+    let client = SchemaRegistryClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let unrelated = Address::generate(&env);
+    let schema_str = String::from_str(&env, "bool like_soroban");
+    let resolver = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.init(&admin);
+    let uid = client.register(&owner, &schema_str, &resolver, &true);
+    client.deprecate(&uid, &unrelated);
 }
 
 #[test]
@@ -137,15 +177,17 @@ fn test_validate_schema() {
     let contract_id = env.register_contract(None, SchemaRegistry);
     let client = SchemaRegistryClient::new(&env, &contract_id);
 
+    let admin = Address::generate(&env);
     let owner = Address::generate(&env);
     let schema_str = String::from_str(&env, "bool like_soroban");
     let resolver = Address::generate(&env);
 
     env.mock_all_auths();
+    client.init(&admin);
     let uid = client.register(&owner, &schema_str, &resolver, &true);
 
     assert!(client.validate_schema(&uid));
 
-    client.deprecate(&uid);
+    client.deprecate(&uid, &owner);
     assert!(!client.validate_schema(&uid));
 }
