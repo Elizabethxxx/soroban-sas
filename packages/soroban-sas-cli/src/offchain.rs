@@ -53,7 +53,9 @@ fn decode_hex32(field: &str, value: &str) -> Result<[u8; 32], String> {
         .map_err(|_| format!("{field} must be exactly 32 bytes"))
 }
 
-fn to_attestation(env: &Env, input: &AttestationInput) -> Result<Attestation, String> {
+/// Parses the CLI JSON representation into the contract's `Attestation`
+/// type. Used by both off-chain signing and direct on-chain issuance.
+pub fn parse_attestation(env: &Env, input: &AttestationInput) -> Result<Attestation, String> {
     let data = hex::decode(input.data.trim_start_matches("0x"))
         .map_err(|e| format!("invalid hex in data: {e}"))?;
     Ok(Attestation {
@@ -85,7 +87,7 @@ pub fn compute_payload_hash(
     contract_id: &str,
 ) -> Result<[u8; 32], String> {
     let env = Env::default();
-    let attestation = to_attestation(&env, input)?;
+    let attestation = parse_attestation(&env, input)?;
     let network_id = env
         .crypto()
         .sha256(&Bytes::from_slice(&env, network_passphrase.as_bytes()));

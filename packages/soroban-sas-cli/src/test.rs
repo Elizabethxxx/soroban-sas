@@ -1,8 +1,48 @@
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
+    use crate::{parse_uid, AttestCommands, Cli, Commands};
+
     #[test]
     fn test_cli_snapshot_formatting() {
         assert_eq!(1, 1);
+    }
+
+    #[test]
+    fn parses_attest_verify_flags() {
+        let uid = hex::encode([7u8; 32]);
+        let cli = Cli::try_parse_from([
+            "soroban-sas",
+            "attest",
+            "verify",
+            "--uid",
+            &uid,
+            "--contract-id",
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "--rpc-url",
+            "https://soroban-testnet.stellar.org",
+            "--json",
+        ])
+        .unwrap();
+
+        let Some(Commands::Attest {
+            action:
+                AttestCommands::Verify {
+                    uid: parsed_uid,
+                    json: true,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected attest verify command");
+        };
+        assert_eq!(parsed_uid, uid);
+    }
+
+    #[test]
+    fn rejects_uid_that_is_not_32_bytes() {
+        assert!(parse_uid("deadbeef").is_err());
     }
 }
 

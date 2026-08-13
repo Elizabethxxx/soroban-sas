@@ -132,20 +132,60 @@ enum SchemaCommands {
 
 #[derive(Subcommand)]
 enum AttestCommands {
-    /// Create a new attestation
+    /// Create and submit a new on-chain attestation
     Create {
         #[arg(long, help = "JSON file containing attestation data")]
-        data_file: Option<String>,
+        data_file: String,
+        #[arg(
+            long,
+            help = "Attester signing key: S... strkey seed or 32-byte hex seed",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(
+            long,
+            help = "Network passphrase to sign against",
+            env = "SOROBAN_NETWORK_PASSPHRASE"
+        )]
+        network_passphrase: String,
+        #[arg(long, help = "SAS contract address (C...)", env = "SAS_CONTRACT_ID")]
+        contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
     },
-    /// Revoke an existing attestation
+    /// Revoke an existing on-chain attestation
     Revoke {
-        #[arg(long)]
+        #[arg(long, help = "32-byte attestation UID, hex encoded")]
         uid: String,
+        #[arg(
+            long,
+            help = "Attester signing key: S... strkey seed or 32-byte hex seed",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(
+            long,
+            help = "Network passphrase to sign against",
+            env = "SOROBAN_NETWORK_PASSPHRASE"
+        )]
+        network_passphrase: String,
+        #[arg(long, help = "SAS contract address (C...)", env = "SAS_CONTRACT_ID")]
+        contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
     },
-    /// Verify an attestation offline
+    /// Verify an on-chain attestation's current validity
     Verify {
-        #[arg(long)]
+        #[arg(long, help = "32-byte attestation UID, hex encoded")]
         uid: String,
+        #[arg(long, help = "SAS contract address (C...)", env = "SAS_CONTRACT_ID")]
+        contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+        #[arg(long, help = "Print raw JSON instead of a human-readable result")]
+        json: bool,
     },
 }
 
@@ -168,6 +208,7 @@ fn main() {
     let result = match cli.command {
         Some(Commands::Offchain { action }) => run_offchain(action),
         Some(Commands::Schema { action }) => run_schema(action),
+        Some(Commands::Attest { action }) => run_attest(action),
         _ => {
             println!("CLI initialized");
             Ok(())
@@ -177,6 +218,105 @@ fn main() {
         eprintln!("error: {err}");
         std::process::exit(1);
     }
+}
+
+fn run_attest(action: AttestCommands) -> Result<(), String> {
+    let env = soroban_sdk::Env::default();
+    match action {
+        AttestCommands::Create {
+            data_file,
+            secret_key,
+            network_passphrase,
+            contract_id,
+            rpc_url,
+        } => {
+            let raw = std::fs::read_to_string(&data_file)
+                .map_err(|e| format!("cannot read {data_file}: {e}"))?;
+            let input: offchain::AttestationInput =
+                serde_json::from_str(&raw).map_err(|e| format!("invalid attestation JSON: {e}"))?;
+            let seed = offchain::parse_secret_seed(&secret_key)?;
+            let expected_attester = stellar_strkey::ed25519::PublicKey(
+                soroban_sas_sdk::signature::derive_public_key(&seed),
+            )
+            .to_string();
+            if input.attester != expected_attester {
+                return Err(format!(
+                    "attester {} does not match signing key account {expected_attester}",
+                    input.attester
+                ));
+            }
+            let attestation = offchain::parse_attestation(&env, &input)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(contract_id);
+            let result = client
+                .attest(&env, &rpc, &network_passphrase, &seed, attestation)
+                .map_err(|e| format!("{e:?}"))?;
+            print_transaction_result(result)
+        }
+        AttestCommands::Revoke {
+            uid,
+            secret_key,
+            network_passphrase,
+            contract_id,
+            rpc_url,
+        } => {
+            let uid = parse_uid(&uid)?;
+            let seed = offchain::parse_secret_seed(&secret_key)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(contract_id);
+            let result = client
+                .revoke(&env, &rpc, &network_passphrase, &seed, &uid)
+                .map_err(|e| format!("{e:?}"))?;
+            print_transaction_result(result)
+        }
+        AttestCommands::Verify {
+            uid,
+            contract_id,
+            rpc_url,
+            json,
+        } => {
+            let uid = parse_uid(&uid)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(contract_id);
+            let valid = client
+                .verify_attestation(&env, &rpc, &uid)
+                .map_err(|e| format!("{e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "valid": valid }))
+                        .map_err(|e| format!("serialization failed: {e}"))?
+                );
+            } else if valid {
+                println!("Attestation is valid");
+            } else {
+                println!("Attestation is invalid or not found");
+            }
+            Ok(())
+        }
+    }
+}
+
+fn parse_uid(value: &str) -> Result<[u8; 32], String> {
+    hex::decode(value.trim_start_matches("0x"))
+        .map_err(|e| format!("invalid hex in uid: {e}"))?
+        .try_into()
+        .map_err(|_| "uid must be exactly 32 bytes".to_string())
+}
+
+fn print_transaction_result(
+    result: soroban_sas_sdk::rpc::GetTransactionResult,
+) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "status": result.status,
+            "envelopeXdr": result.envelope_xdr,
+            "resultXdr": result.result_xdr,
+        }))
+        .map_err(|e| format!("serialization failed: {e}"))?
+    );
+    Ok(())
 }
 
 fn run_schema(action: SchemaCommands) -> Result<(), String> {
@@ -223,10 +363,7 @@ fn run_schema(action: SchemaCommands) -> Result<(), String> {
             rpc_url,
             json,
         } => {
-            let uid_bytes: [u8; 32] = hex::decode(uid.trim_start_matches("0x"))
-                .map_err(|e| format!("invalid hex in uid: {e}"))?
-                .try_into()
-                .map_err(|_| "uid must be exactly 32 bytes".to_string())?;
+            let uid_bytes = parse_uid(&uid)?;
             let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
             let client = soroban_sas_sdk::client::SASClient::new(registry_contract_id.clone());
             let schema = client
