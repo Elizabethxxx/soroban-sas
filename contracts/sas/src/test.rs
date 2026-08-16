@@ -209,6 +209,172 @@ fn test_revocation_success() {
     sas_client.revoke(&uid);
 }
 
+mod replace {
+    use super::*;
+
+    pub struct Fixture {
+        pub env: Env,
+        pub sas_client: SASClient<'static>,
+        pub sas_id: Address,
+        pub attester: Address,
+        pub recipient: Address,
+        pub old_uid: UID,
+    }
+
+    /// Registers SAS + a mock registry, attests one revocable attestation
+    /// under `old_uid`, and returns everything a `replace_attestation` test
+    /// needs to build a replacement for it.
+    pub fn setup(revocable: bool) -> Fixture {
+        let env = Env::default();
+        let registry_id = env.register_contract(None, mock1::MockRegistry);
+        let sas_id = env.register_contract(None, SAS);
+        let sas_client = SASClient::new(&env, &sas_id);
+
+        let admin = Address::generate(&env);
+        sas_client.init(&admin, &registry_id);
+
+        let attester = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let old_uid = UID(BytesN::from_array(&env, &[1u8; 32]));
+
+        let old_attestation = Attestation {
+            uid: old_uid.clone(),
+            schema_uid: UID(BytesN::from_array(&env, &[2u8; 32])),
+            time: 1000,
+            expiration_time: 0,
+            revocation_time: 0,
+            ref_uid: UID(BytesN::from_array(&env, &[0u8; 32])),
+            recipient: recipient.clone(),
+            attester: attester.clone(),
+            revocable,
+            data: Bytes::new(&env),
+        };
+
+        env.mock_all_auths();
+        sas_client.attest(&old_attestation);
+
+        // Ledger timestamp defaults to 0 in a fresh test Env, which would
+        // make a revocation's `revocation_time` indistinguishable from
+        // never-revoked (`verify_attestation` treats 0 as "not revoked").
+        env.ledger().with_mut(|li| li.timestamp = 5000);
+
+        Fixture {
+            env,
+            sas_client,
+            sas_id,
+            attester,
+            recipient,
+            old_uid,
+        }
+    }
+
+    impl Fixture {
+        /// A replacement attestation reusing this fixture's attester and
+        /// recipient (the invariants `replace_attestation` enforces).
+        pub fn new_attestation(&self, uid: [u8; 32]) -> Attestation {
+            Attestation {
+                uid: UID(BytesN::from_array(&self.env, &uid)),
+                schema_uid: UID(BytesN::from_array(&self.env, &[3u8; 32])),
+                time: 2000,
+                expiration_time: 0,
+                revocation_time: 0,
+                // Deliberately wrong: replace_attestation must overwrite this
+                // with old_uid regardless of what's passed in.
+                ref_uid: UID(BytesN::from_array(&self.env, &[9u8; 32])),
+                recipient: self.recipient.clone(),
+                attester: self.attester.clone(),
+                revocable: true,
+                data: Bytes::from_slice(&self.env, &[7, 7, 7]),
+            }
+        }
+    }
+}
+
+#[test]
+fn test_replace_attestation_success() {
+    let f = replace::setup(true);
+    let new_attestation = f.new_attestation([2u8; 32]);
+
+    let returned_uid = f
+        .sas_client
+        .replace_attestation(&f.old_uid, &new_attestation);
+    assert_eq!(returned_uid, new_attestation.uid);
+
+    // Old is now revoked; new is valid.
+    assert!(!f.sas_client.verify_attestation(&f.old_uid));
+    assert!(f.sas_client.verify_attestation(&new_attestation.uid));
+
+    // The new attestation is linked back to the old one via ref_uid,
+    // overwriting whatever the caller passed.
+    let stored: Attestation = f.env.as_contract(&f.sas_id, || {
+        f.env
+            .storage()
+            .persistent()
+            .get(&new_attestation.uid)
+            .unwrap()
+    });
+    assert_eq!(stored.ref_uid, f.old_uid);
+}
+
+#[test]
+fn test_replace_attestation_rejects_non_revocable() {
+    let f = replace::setup(false);
+    let new_attestation = f.new_attestation([2u8; 32]);
+
+    let res = f
+        .sas_client
+        .try_replace_attestation(&f.old_uid, &new_attestation);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_replace_attestation_rejects_already_revoked() {
+    let f = replace::setup(true);
+    f.sas_client.revoke(&f.old_uid);
+
+    let new_attestation = f.new_attestation([2u8; 32]);
+    let res = f
+        .sas_client
+        .try_replace_attestation(&f.old_uid, &new_attestation);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_replace_attestation_rejects_unknown_old_uid() {
+    let f = replace::setup(true);
+    let unknown_uid = UID(BytesN::from_array(&f.env, &[99u8; 32]));
+    let new_attestation = f.new_attestation([2u8; 32]);
+
+    let res = f
+        .sas_client
+        .try_replace_attestation(&unknown_uid, &new_attestation);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_replace_attestation_rejects_mismatched_attester() {
+    let f = replace::setup(true);
+    let mut new_attestation = f.new_attestation([2u8; 32]);
+    new_attestation.attester = Address::generate(&f.env);
+
+    let res = f
+        .sas_client
+        .try_replace_attestation(&f.old_uid, &new_attestation);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_replace_attestation_rejects_mismatched_recipient() {
+    let f = replace::setup(true);
+    let mut new_attestation = f.new_attestation([2u8; 32]);
+    new_attestation.recipient = Address::generate(&f.env);
+
+    let res = f
+        .sas_client
+        .try_replace_attestation(&f.old_uid, &new_attestation);
+    assert!(res.is_err());
+}
+
 /*
 #[test]
 fn test_revocation_failure() {

@@ -147,6 +147,42 @@ impl SAS {
         events::publish_revoked(&env, &uid, timestamp);
     }
 
+    /// Atomically replaces `old_uid` with `new_data`: revokes the old
+    /// attestation and issues a new one linked to it via `ref_uid`, in a
+    /// single contract execution — so consumers checking `old_uid`'s
+    /// recipient never observe a window where neither attestation is valid.
+    ///
+    /// `new_data.ref_uid` is set to `old_uid` by this function regardless of
+    /// what the caller passed, so the linkage can't be spoofed. Requires
+    /// `old_uid`'s attester to authorize the call, the old attestation to be
+    /// revocable and not already revoked, and `new_data.attester`/`recipient`
+    /// to match the old attestation's — a replacement changes what is being
+    /// claimed, not who is claiming it or about whom.
+    pub fn replace_attestation(env: Env, old_uid: UID, new_data: Attestation) -> UID {
+        let Some(old) = env.storage().persistent().get::<_, Attestation>(&old_uid) else {
+            panic_with_error!(&env, SASError::AttestationNotFound);
+        };
+
+        old.attester.require_auth();
+
+        if !old.revocable {
+            panic_with_error!(&env, SASError::NotRevocable);
+        }
+        if old.revocation_time != 0 {
+            panic_with_error!(&env, SASError::AlreadyRevoked);
+        }
+        if new_data.attester != old.attester || new_data.recipient != old.recipient {
+            panic_with_error!(&env, SASError::Unauthorized);
+        }
+
+        let new_data = Attestation {
+            ref_uid: old_uid.clone(),
+            ..new_data
+        };
+        Self::revoke_internal(env.clone(), old_uid);
+        Self::attest_internal(env, new_data)
+    }
+
     pub fn multi_attest(
         env: Env,
         attestations: soroban_sdk::Vec<Attestation>,
