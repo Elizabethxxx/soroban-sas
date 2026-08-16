@@ -193,13 +193,33 @@ enum AttestCommands {
 enum QueryCommands {
     /// Query attestations by recipient address
     ByRecipient {
-        #[arg(long)]
+        #[arg(long, help = "Recipient account address (G...)")]
         address: String,
+        #[arg(
+            long,
+            help = "Indexer contract address (C...)",
+            env = "INDEXER_CONTRACT_ID"
+        )]
+        contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+        #[arg(long, help = "Print raw JSON instead of one UID per line")]
+        json: bool,
     },
     /// Query attestations by schema UID
     BySchema {
-        #[arg(long)]
+        #[arg(long, help = "32-byte schema UID, hex encoded")]
         uid: String,
+        #[arg(
+            long,
+            help = "Indexer contract address (C...)",
+            env = "INDEXER_CONTRACT_ID"
+        )]
+        contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+        #[arg(long, help = "Print raw JSON instead of one UID per line")]
+        json: bool,
     },
 }
 
@@ -209,6 +229,7 @@ fn main() {
         Some(Commands::Offchain { action }) => run_offchain(action),
         Some(Commands::Schema { action }) => run_schema(action),
         Some(Commands::Attest { action }) => run_attest(action),
+        Some(Commands::Query { action }) => run_query(action),
         _ => {
             println!("CLI initialized");
             Ok(())
@@ -316,6 +337,60 @@ fn print_transaction_result(
         }))
         .map_err(|e| format!("serialization failed: {e}"))?
     );
+    Ok(())
+}
+
+fn run_query(action: QueryCommands) -> Result<(), String> {
+    let env = soroban_sdk::Env::default();
+    match action {
+        QueryCommands::ByRecipient {
+            address,
+            contract_id,
+            rpc_url,
+            json,
+        } => {
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::IndexerClient::new(contract_id);
+            let uids = client
+                .get_attestations_by_recipient(&env, &rpc, &address)
+                .map_err(|e| format!("{e:?}"))?;
+            print_uids(&uids, json)
+        }
+        QueryCommands::BySchema {
+            uid,
+            contract_id,
+            rpc_url,
+            json,
+        } => {
+            let schema_uid = parse_uid(&uid)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::IndexerClient::new(contract_id);
+            let uids = client
+                .get_attestations_by_schema(&env, &rpc, &schema_uid)
+                .map_err(|e| format!("{e:?}"))?;
+            print_uids(&uids, json)
+        }
+    }
+}
+
+fn print_uids(uids: &soroban_sdk::Vec<soroban_sas_common::UID>, json: bool) -> Result<(), String> {
+    let hex_uids: Vec<String> = uids
+        .iter()
+        .map(|uid| hex::encode(uid.0.to_array()))
+        .collect();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&hex_uids)
+                .map_err(|e| format!("serialization failed: {e}"))?
+        );
+    } else if hex_uids.is_empty() {
+        println!("No attestations found");
+    } else {
+        for uid in hex_uids {
+            println!("{uid}");
+        }
+    }
     Ok(())
 }
 

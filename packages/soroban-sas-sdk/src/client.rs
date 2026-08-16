@@ -155,6 +155,57 @@ impl SASClient {
     }
 }
 
+/// Client for the Indexer contract's read-only attestation lookups.
+pub struct IndexerClient {
+    /// The Indexer contract's Soroban contract ID.
+    pub contract_id: String,
+}
+
+impl IndexerClient {
+    /// Instantiates a new IndexerClient with the given contract ID.
+    pub fn new(contract_id: String) -> Self {
+        Self { contract_id }
+    }
+
+    /// Calls `Indexer::get_attestations_by_recipient(recipient)` via
+    /// `simulateTransaction` — a pure read, same as `SASClient::get_schema`.
+    pub fn get_attestations_by_recipient(
+        &self,
+        env: &Env,
+        rpc: &RpcClient,
+        recipient: &str,
+    ) -> Result<soroban_sdk::Vec<UID>, SdkError> {
+        let recipient = Address::from_string(&SorobanString::from_str(env, recipient));
+        let arg = simulate::encode_arg(env, &recipient)?;
+        invoke_read_only(
+            env,
+            rpc,
+            &self.contract_id,
+            "get_attestations_by_recipient",
+            vec![arg],
+        )
+    }
+
+    /// Calls `Indexer::get_attestations_by_schema(schema_uid)` via
+    /// `simulateTransaction`.
+    pub fn get_attestations_by_schema(
+        &self,
+        env: &Env,
+        rpc: &RpcClient,
+        schema_uid: &[u8; 32],
+    ) -> Result<soroban_sdk::Vec<UID>, SdkError> {
+        let schema_uid = UID(BytesN::from_array(env, schema_uid));
+        let arg = simulate::encode_arg(env, &schema_uid)?;
+        invoke_read_only(
+            env,
+            rpc,
+            &self.contract_id,
+            "get_attestations_by_schema",
+            vec![arg],
+        )
+    }
+}
+
 /// Simulates a read-only call to `function_name` on `contract_id` and
 /// decodes its return value as `T`.
 fn invoke_read_only<T>(
