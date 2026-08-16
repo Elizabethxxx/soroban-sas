@@ -153,6 +153,35 @@ impl SASClient {
             vec![arg],
         )
     }
+
+    /// Calls `SAS::replace_attestation(old_uid, new_data)`, same
+    /// signing/submission flow as `attest`. Requires `secret_seed`'s
+    /// account to be both `old_uid`'s attester and `new_data.attester`
+    /// (the contract itself enforces the latter matches the former).
+    pub fn replace_attestation(
+        &self,
+        env: &Env,
+        rpc: &RpcClient,
+        network_passphrase: &str,
+        secret_seed: &[u8; 32],
+        old_uid: &[u8; 32],
+        new_data: Attestation,
+    ) -> Result<GetTransactionResult, SdkError> {
+        let old_uid = UID(BytesN::from_array(env, old_uid));
+        let args = vec![
+            simulate::encode_arg(env, &old_uid)?,
+            simulate::encode_arg(env, &new_data)?,
+        ];
+        invoke_write(
+            env,
+            rpc,
+            network_passphrase,
+            secret_seed,
+            &self.contract_id,
+            "replace_attestation",
+            args,
+        )
+    }
 }
 
 /// Client for the Indexer contract's read-only attestation lookups.

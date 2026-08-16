@@ -187,6 +187,35 @@ enum AttestCommands {
         #[arg(long, help = "Print raw JSON instead of a human-readable result")]
         json: bool,
     },
+    /// Atomically revoke an attestation and issue a replacement linked to
+    /// it via ref_uid. The replacement's attester/recipient must match the
+    /// original's.
+    Replace {
+        #[arg(
+            long,
+            help = "32-byte UID of the attestation being replaced, hex encoded"
+        )]
+        old_uid: String,
+        #[arg(long, help = "JSON file containing the replacement attestation data")]
+        data_file: String,
+        #[arg(
+            long,
+            help = "Attester signing key: S... strkey seed or 32-byte hex seed",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(
+            long,
+            help = "Network passphrase to sign against",
+            env = "SOROBAN_NETWORK_PASSPHRASE"
+        )]
+        network_passphrase: String,
+        #[arg(long, help = "SAS contract address (C...)", env = "SAS_CONTRACT_ID")]
+        contract_id: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -314,6 +343,38 @@ fn run_attest(action: AttestCommands) -> Result<(), String> {
                 println!("Attestation is invalid or not found");
             }
             Ok(())
+        }
+        AttestCommands::Replace {
+            old_uid,
+            data_file,
+            secret_key,
+            network_passphrase,
+            contract_id,
+            rpc_url,
+        } => {
+            let old_uid = parse_uid(&old_uid)?;
+            let raw = std::fs::read_to_string(&data_file)
+                .map_err(|e| format!("cannot read {data_file}: {e}"))?;
+            let input: offchain::AttestationInput =
+                serde_json::from_str(&raw).map_err(|e| format!("invalid attestation JSON: {e}"))?;
+            let seed = offchain::parse_secret_seed(&secret_key)?;
+            let expected_attester = stellar_strkey::ed25519::PublicKey(
+                soroban_sas_sdk::signature::derive_public_key(&seed),
+            )
+            .to_string();
+            if input.attester != expected_attester {
+                return Err(format!(
+                    "attester {} does not match signing key account {expected_attester}",
+                    input.attester
+                ));
+            }
+            let new_data = offchain::parse_attestation(&env, &input)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(contract_id);
+            let result = client
+                .replace_attestation(&env, &rpc, &network_passphrase, &seed, &old_uid, new_data)
+                .map_err(|e| format!("{e:?}"))?;
+            print_transaction_result(result)
         }
     }
 }
