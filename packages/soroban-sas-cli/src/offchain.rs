@@ -6,7 +6,9 @@
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
-use soroban_sas_common::{hash_offchain_attestation, Attestation, AttestationDomain, UID};
+use soroban_sas_common::{
+    hash_delegated_revocation, hash_offchain_attestation, Attestation, AttestationDomain, UID,
+};
 use soroban_sdk::{Address, Bytes, BytesN, Env, String as SorobanString};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +169,67 @@ pub fn verify_offchain_attestation(signed: &SignedOffchainAttestation) -> Result
     verifying_key
         .verify(&payload_hash, &Signature::from_bytes(&signature_bytes))
         .map_err(|_| "signature verification failed".to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedDelegatedRevocation {
+    /// 32-byte attestation UID being revoked, hex encoded.
+    pub uid: String,
+    /// Attester account address (strkey `G...`); must match the signing key.
+    pub attester: String,
+    pub nonce: u64,
+    pub network_passphrase: String,
+    /// Address of the SAS contract the signature is bound to (strkey `C...`).
+    pub contract_id: String,
+    /// Hex-encoded 32-byte ed25519 public key of the attester.
+    pub public_key: String,
+    /// Hex-encoded 64-byte ed25519 signature over the payload digest.
+    pub signature: String,
+}
+
+/// Signs a delegated revocation with a 32-byte ed25519 seed, for later
+/// submission via `SAS::revoke_by_delegation` by any relayer.
+pub fn sign_delegated_revocation(
+    uid_hex: &str,
+    attester: &str,
+    nonce: u64,
+    network_passphrase: &str,
+    contract_id: &str,
+    secret_seed: &[u8; 32],
+) -> Result<SignedDelegatedRevocation, String> {
+    let signing_key = SigningKey::from_bytes(secret_seed);
+    let public_key = signing_key.verifying_key().to_bytes();
+
+    let expected_attester = stellar_strkey::ed25519::PublicKey(public_key).to_string();
+    if attester != expected_attester {
+        return Err(format!(
+            "attester {attester} does not match signing key account {expected_attester}"
+        ));
+    }
+
+    let env = Env::default();
+    let uid = UID(BytesN::from_array(&env, &decode_hex32("uid", uid_hex)?));
+    let attester_address = Address::from_string(&SorobanString::from_str(&env, attester));
+    let network_id = env
+        .crypto()
+        .sha256(&Bytes::from_slice(&env, network_passphrase.as_bytes()));
+    let domain = AttestationDomain {
+        network_id,
+        contract: Address::from_string(&SorobanString::from_str(&env, contract_id)),
+        nonce,
+    };
+    let payload_hash = hash_delegated_revocation(&env, &uid, &attester_address, &domain);
+    let signature: Signature = signing_key.sign(&payload_hash.to_array());
+
+    Ok(SignedDelegatedRevocation {
+        uid: uid_hex.trim_start_matches("0x").to_string(),
+        attester: attester.to_string(),
+        nonce,
+        network_passphrase: network_passphrase.to_string(),
+        contract_id: contract_id.to_string(),
+        public_key: hex::encode(public_key),
+        signature: hex::encode(signature.to_bytes()),
+    })
 }
 
 pub fn parse_secret_seed(value: &str) -> Result<[u8; 32], String> {

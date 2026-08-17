@@ -33,10 +33,11 @@ enum Commands {
         #[command(subcommand)]
         action: QueryCommands,
     },
-    /// Generate off-chain delegated signatures
+    /// Sign delegated attestations/revocations off-chain, and submit
+    /// already-signed ones on-chain via a relayer
     Delegate {
-        #[arg(long, help = "JSON payload to sign")]
-        payload: String,
+        #[command(subcommand)]
+        action: DelegateCommands,
     },
     /// Off-chain attestation signing and verification
     Offchain {
@@ -252,6 +253,77 @@ enum QueryCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum DelegateCommands {
+    /// Sign a delegated revocation off-chain. (Attestation-issuance signing
+    /// already exists via `offchain sign` — its output is what
+    /// `submit-attest` expects.)
+    SignRevoke {
+        #[arg(long, help = "32-byte attestation UID to revoke, hex encoded")]
+        uid: String,
+        #[arg(
+            long,
+            help = "Attester account address (strkey G...); must match --secret-key"
+        )]
+        attester: String,
+        #[arg(long, help = "Replay-protection nonce bound into the signature")]
+        nonce: u64,
+        #[arg(long, help = "Network passphrase the signature is bound to")]
+        network_passphrase: String,
+        #[arg(long, help = "SAS contract address (C...) the signature is bound to")]
+        contract_id: String,
+        #[arg(
+            long,
+            help = "Attester's signing key: S... strkey seed or 32-byte hex seed",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(
+            long,
+            help = "Write the signed revocation to this file instead of stdout"
+        )]
+        output: Option<String>,
+    },
+    /// Submit an already-signed delegated attestation on-chain via
+    /// `attest_by_delegation`, paid for by --secret-key's account (a
+    /// relayer — it does not need to be the attester).
+    SubmitAttest {
+        #[arg(
+            long,
+            help = "JSON file containing a signed attestation (from `offchain sign`)"
+        )]
+        file: String,
+        #[arg(
+            long,
+            help = "Relayer's signing key: S... strkey seed or 32-byte hex seed (pays for and submits the tx; need not be the attester)",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+    },
+    /// Submit an already-signed delegated revocation on-chain via
+    /// `revoke_by_delegation`, same relayer model as `submit-attest`.
+    SubmitRevoke {
+        #[arg(
+            long,
+            help = "JSON file containing a signed revocation (from `delegate sign-revoke`)"
+        )]
+        file: String,
+        #[arg(
+            long,
+            help = "Relayer's signing key: S... strkey seed or 32-byte hex seed (pays for and submits the tx; need not be the attester)",
+            env = "SAS_SECRET_KEY",
+            hide_env_values = true
+        )]
+        secret_key: String,
+        #[arg(long, help = "Soroban RPC endpoint URL", env = "SOROBAN_RPC_URL")]
+        rpc_url: String,
+    },
+}
+
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -259,6 +331,7 @@ fn main() {
         Some(Commands::Schema { action }) => run_schema(action),
         Some(Commands::Attest { action }) => run_attest(action),
         Some(Commands::Query { action }) => run_query(action),
+        Some(Commands::Delegate { action }) => run_delegate(action),
         _ => {
             println!("CLI initialized");
             Ok(())
@@ -453,6 +526,108 @@ fn print_uids(uids: &soroban_sdk::Vec<soroban_sas_common::UID>, json: bool) -> R
         }
     }
     Ok(())
+}
+
+fn decode_hex64(value: &str) -> Result<[u8; 64], String> {
+    hex::decode(value.trim_start_matches("0x"))
+        .map_err(|e| format!("invalid hex: {e}"))?
+        .try_into()
+        .map_err(|_| "value must be exactly 64 bytes".to_string())
+}
+
+fn run_delegate(action: DelegateCommands) -> Result<(), String> {
+    let env = soroban_sdk::Env::default();
+    match action {
+        DelegateCommands::SignRevoke {
+            uid,
+            attester,
+            nonce,
+            network_passphrase,
+            contract_id,
+            secret_key,
+            output,
+        } => {
+            let seed = offchain::parse_secret_seed(&secret_key)?;
+            let signed = offchain::sign_delegated_revocation(
+                &uid,
+                &attester,
+                nonce,
+                &network_passphrase,
+                &contract_id,
+                &seed,
+            )?;
+            let json = serde_json::to_string_pretty(&signed)
+                .map_err(|e| format!("serialization failed: {e}"))?;
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, &json).map_err(|e| format!("cannot write {path}: {e}"))?
+                }
+                None => println!("{json}"),
+            }
+            Ok(())
+        }
+        DelegateCommands::SubmitAttest {
+            file,
+            secret_key,
+            rpc_url,
+        } => {
+            let raw =
+                std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
+            let signed: offchain::SignedOffchainAttestation = serde_json::from_str(&raw)
+                .map_err(|e| format!("invalid signed attestation JSON: {e}"))?;
+            offchain::verify_offchain_attestation(&signed)?;
+
+            let attestation = offchain::parse_attestation(&env, &signed.attestation)?;
+            let public_key = parse_uid(&signed.public_key)?;
+            let signature = decode_hex64(&signed.signature)?;
+            let relayer_seed = offchain::parse_secret_seed(&secret_key)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(signed.contract_id.clone());
+            let result = client
+                .attest_by_delegation(
+                    &env,
+                    &rpc,
+                    &signed.network_passphrase,
+                    &relayer_seed,
+                    attestation,
+                    signed.nonce,
+                    &signature,
+                    &public_key,
+                )
+                .map_err(|e| format!("{e:?}"))?;
+            print_transaction_result(result)
+        }
+        DelegateCommands::SubmitRevoke {
+            file,
+            secret_key,
+            rpc_url,
+        } => {
+            let raw =
+                std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
+            let signed: offchain::SignedDelegatedRevocation = serde_json::from_str(&raw)
+                .map_err(|e| format!("invalid signed revocation JSON: {e}"))?;
+
+            let uid = parse_uid(&signed.uid)?;
+            let public_key = parse_uid(&signed.public_key)?;
+            let signature = decode_hex64(&signed.signature)?;
+            let relayer_seed = offchain::parse_secret_seed(&secret_key)?;
+            let rpc = soroban_sas_sdk::rpc::RpcClient::new(rpc_url);
+            let client = soroban_sas_sdk::client::SASClient::new(signed.contract_id.clone());
+            let result = client
+                .revoke_by_delegation(
+                    &env,
+                    &rpc,
+                    &signed.network_passphrase,
+                    &relayer_seed,
+                    &uid,
+                    signed.nonce,
+                    &signature,
+                    &public_key,
+                )
+                .map_err(|e| format!("{e:?}"))?;
+            print_transaction_result(result)
+        }
+    }
 }
 
 fn run_schema(action: SchemaCommands) -> Result<(), String> {

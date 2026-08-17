@@ -154,6 +154,80 @@ impl SASClient {
         )
     }
 
+    /// Calls `SAS::attest_by_delegation(attestation, nonce, signature,
+    /// public_key)`: submits an already off-chain-signed attestation.
+    ///
+    /// Unlike `attest`, `relayer_secret_seed` does not need to be the
+    /// attester — the contract authenticates the attestation via the
+    /// ed25519 `signature` over the typed-data payload, not
+    /// `require_auth()`, so any funded account can pay for and submit this
+    /// on the attester's behalf (see `offchain::sign_offchain_attestation`
+    /// in the CLI for producing `signature`/`public_key`/`nonce`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn attest_by_delegation(
+        &self,
+        env: &Env,
+        rpc: &RpcClient,
+        network_passphrase: &str,
+        relayer_secret_seed: &[u8; 32],
+        attestation: Attestation,
+        nonce: u64,
+        signature: &[u8; 64],
+        public_key: &[u8; 32],
+    ) -> Result<GetTransactionResult, SdkError> {
+        let signature = BytesN::from_array(env, signature);
+        let public_key = BytesN::from_array(env, public_key);
+        let args = vec![
+            simulate::encode_arg(env, &attestation)?,
+            simulate::encode_arg(env, &nonce)?,
+            simulate::encode_arg(env, &signature)?,
+            simulate::encode_arg(env, &public_key)?,
+        ];
+        invoke_write(
+            env,
+            rpc,
+            network_passphrase,
+            relayer_secret_seed,
+            &self.contract_id,
+            "attest_by_delegation",
+            args,
+        )
+    }
+
+    /// Calls `SAS::revoke_by_delegation(uid, nonce, signature,
+    /// public_key)`, same relayer model as `attest_by_delegation`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn revoke_by_delegation(
+        &self,
+        env: &Env,
+        rpc: &RpcClient,
+        network_passphrase: &str,
+        relayer_secret_seed: &[u8; 32],
+        uid: &[u8; 32],
+        nonce: u64,
+        signature: &[u8; 64],
+        public_key: &[u8; 32],
+    ) -> Result<GetTransactionResult, SdkError> {
+        let uid = UID(BytesN::from_array(env, uid));
+        let signature = BytesN::from_array(env, signature);
+        let public_key = BytesN::from_array(env, public_key);
+        let args = vec![
+            simulate::encode_arg(env, &uid)?,
+            simulate::encode_arg(env, &nonce)?,
+            simulate::encode_arg(env, &signature)?,
+            simulate::encode_arg(env, &public_key)?,
+        ];
+        invoke_write(
+            env,
+            rpc,
+            network_passphrase,
+            relayer_secret_seed,
+            &self.contract_id,
+            "revoke_by_delegation",
+            args,
+        )
+    }
+
     /// Calls `SAS::replace_attestation(old_uid, new_data)`, same
     /// signing/submission flow as `attest`. Requires `secret_seed`'s
     /// account to be both `old_uid`'s attester and `new_data.attester`
