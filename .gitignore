@@ -6,3 +6,5 @@ cargo_err.log
 .env.*
 !.env.example
 
+.env
+*.env.bak
