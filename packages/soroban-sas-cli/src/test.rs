@@ -2,11 +2,30 @@
 mod tests {
     use clap::Parser;
 
-    use crate::{parse_uid, AttestCommands, Cli, Commands};
+    use crate::{parse_uid, validate_schema_syntax, AttestCommands, Cli, Commands, OutputFormat};
 
     #[test]
     fn test_cli_snapshot_formatting() {
         assert_eq!(1, 1);
+    }
+
+    #[test]
+    fn rejects_empty_and_oversized_schemas_locally() {
+        // #26 — an empty (or whitespace-only) schema is rejected before any
+        // transaction is built, and so is one past the 1024-byte limit.
+        assert!(validate_schema_syntax("").is_err());
+        assert!(validate_schema_syntax("   ").is_err());
+        assert!(validate_schema_syntax(&"a".repeat(1025)).is_err());
+        assert!(validate_schema_syntax("string name").is_ok());
+    }
+
+    #[test]
+    fn output_flag_parses_and_defaults_to_human() {
+        let default = Cli::try_parse_from(["soroban-sas"]).unwrap();
+        assert_eq!(default.output, OutputFormat::Human);
+
+        let json = Cli::try_parse_from(["soroban-sas", "--output", "json"]).unwrap();
+        assert_eq!(json.output, OutputFormat::Json);
     }
 
     #[test]
