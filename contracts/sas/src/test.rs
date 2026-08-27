@@ -789,6 +789,48 @@ fn test_unknown_schema_reports_invalid_schema() {
 }
 
 #[test]
+fn test_attest_rejects_zero_recipient() {
+    let env = Env::default();
+
+    let registry_id = env.register_contract(None, mock1::MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+
+    let attester = Address::generate(&env);
+    let recipient = Address::from_string(&soroban_sdk::String::from_str(
+        &env,
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+    ));
+    let attestation = attestation_fixture(&env, &attester, &recipient, [15u8; 32]);
+
+    env.mock_all_auths();
+    let res = sas_client.try_attest(&attestation);
+    assert_eq!(res, Err(Ok(SASError::InvalidRecipient.into())));
+}
+
+#[test]
+fn test_attest_rejects_self_attestation() {
+    let env = Env::default();
+
+    let registry_id = env.register_contract(None, mock1::MockRegistry);
+    let sas_id = env.register_contract(None, SAS);
+    let sas_client = SASClient::new(&env, &sas_id);
+
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+
+    let attester = Address::generate(&env);
+    let attestation = attestation_fixture(&env, &attester, &attester, [16u8; 32]);
+
+    env.mock_all_auths();
+    let res = sas_client.try_attest(&attestation);
+    assert_eq!(res, Err(Ok(SASError::InvalidRecipient.into())));
+}
+
+#[test]
 fn test_non_revocable_attestation_reports_not_revocable() {
     let env = Env::default();
 

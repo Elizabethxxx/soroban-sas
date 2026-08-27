@@ -17,6 +17,9 @@ mod tests {
         assert!(validate_schema_syntax("   ").is_err());
         assert!(validate_schema_syntax(&"a".repeat(1025)).is_err());
         assert!(validate_schema_syntax("string name").is_ok());
+        assert!(validate_schema_syntax("!!!").is_err());
+        assert!(validate_schema_syntax("12345").is_err());
+        assert!(validate_schema_syntax("first_name String, last_name String").is_ok());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 #![no_std]
 #![allow(unused_variables)]
 
-use soroban_sas_common::{SASError, SchemaRecord, LEDGERS_IN_ONE_YEAR, UID};
+use soroban_sas_common::{validate_schema_syntax, SASError, SchemaRecord, LEDGERS_IN_ONE_YEAR, UID};
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, xdr::ToXdr, Address, Bytes, Env, String,
 };
@@ -79,6 +79,10 @@ impl SchemaRegistry {
         resolver: Address,
         revocable: bool,
     ) -> UID {
+        if let Err(err) = validate_schema_syntax(&env, &schema) {
+            panic_with_error!(&env, err);
+        }
+
         // The owner must authorize the registration so the emitted event
         // carries a caller identity that off-chain indexers can trust.
         owner.require_auth();

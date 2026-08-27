@@ -72,6 +72,13 @@ impl SAS {
             panic_with_error!(&env, SASError::AlreadyExpired);
         }
 
+        if let Err(err) = soroban_sas_common::validate_recipient(&env, &attestation.recipient) {
+            panic_with_error!(&env, err);
+        }
+        if attestation.recipient == attestation.attester {
+            panic_with_error!(&env, SASError::InvalidRecipient);
+        }
+
         let registry: Address = env.storage().instance().get(&SCHEMA_REGISTRY).unwrap();
         let schema_opt: Option<soroban_sas_common::SchemaRecord> = env.invoke_contract(
             &registry,
