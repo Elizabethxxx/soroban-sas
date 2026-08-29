@@ -2,7 +2,9 @@
 #![no_std]
 #![allow(unused_variables)]
 
-use soroban_sas_common::{validate_schema_syntax, SASError, SchemaRecord, LEDGERS_IN_ONE_YEAR, UID};
+use soroban_sas_common::{
+    extend_instance_ttl, validate_schema_syntax, SASError, SchemaRecord, LEDGERS_IN_ONE_YEAR, UID,
+};
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, xdr::ToXdr, Address, Bytes, Env, String,
 };
@@ -25,11 +27,13 @@ impl SchemaRegistry {
             panic_with_error!(&env, SASError::AlreadyInitialized);
         }
         env.storage().instance().set(&REGISTRY_ADMIN, &admin);
+        extend_instance_ttl(&env);
     }
 
     pub fn upgrade(env: Env, new_wasm_hash: soroban_sdk::BytesN<32>) {
         let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         admin.require_auth();
+        extend_instance_ttl(&env);
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
@@ -37,17 +41,20 @@ impl SchemaRegistry {
         let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         admin.require_auth();
         env.storage().instance().set(&SCHEMA_FEE, &fee);
+        extend_instance_ttl(&env);
     }
 
     pub fn set_treasury(env: Env, treasury: soroban_sdk::Address) {
         let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         admin.require_auth();
         env.storage().instance().set(&TREASURY, &treasury);
+        extend_instance_ttl(&env);
     }
 
     pub fn withdraw_fees(env: Env, amount: i128) {
         let admin: soroban_sdk::Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         admin.require_auth();
+        extend_instance_ttl(&env);
         // Native token transfer logic goes here
     }
 
@@ -75,6 +82,7 @@ impl SchemaRegistry {
             LEDGERS_IN_ONE_YEAR,
             LEDGERS_IN_ONE_YEAR,
         );
+        extend_instance_ttl(&env);
     }
 
     pub fn register(
@@ -141,10 +149,13 @@ impl SchemaRegistry {
             },
         );
 
+        extend_instance_ttl(&env);
+
         uid
     }
 
     pub fn get_schema(env: Env, uid: UID) -> Option<SchemaRecord> {
+        extend_instance_ttl(&env);
         if env
             .storage()
             .persistent()
@@ -157,6 +168,7 @@ impl SchemaRegistry {
     }
 
     pub fn validate_schema(env: Env, uid: UID) -> bool {
+        extend_instance_ttl(&env);
         if env
             .storage()
             .persistent()

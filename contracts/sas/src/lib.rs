@@ -1,7 +1,7 @@
 #![allow(unexpected_cfgs)]
 #![no_std]
 
-use soroban_sas_common::{Attestation, SASError, LEDGERS_IN_ONE_YEAR, UID};
+use soroban_sas_common::{extend_instance_ttl, Attestation, SASError, LEDGERS_IN_ONE_YEAR, UID};
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, symbol_short, token, Address, Env, IntoVal, Symbol,
 };
@@ -37,6 +37,7 @@ impl SAS {
         }
         env.storage().instance().set(&SAS_ADMIN, &admin);
         env.storage().instance().set(&SCHEMA_REGISTRY, &registry);
+        extend_instance_ttl(&env);
     }
 
     /// Binds an Indexer contract that should mirror newly issued attestations.
@@ -44,6 +45,7 @@ impl SAS {
         let admin: Address = env.storage().instance().get(&SAS_ADMIN).unwrap();
         admin.require_auth();
         env.storage().instance().set(&INDEXER, &indexer);
+        extend_instance_ttl(&env);
     }
 
     pub fn attest(env: Env, attestation: Attestation) -> UID {
@@ -131,6 +133,7 @@ impl SAS {
         }
 
         events::publish_attested(&env, &attestation);
+        extend_instance_ttl(&env);
 
         attestation.uid.clone()
     }
@@ -361,6 +364,7 @@ impl SAS {
         public_key: soroban_sdk::BytesN<32>,
         signature: soroban_sdk::BytesN<64>,
     ) -> bool {
+        extend_instance_ttl(&env);
         Self::require_attester_key(&env, &attestation.attester, &public_key);
 
         if attestation.revocation_time != 0 {
@@ -402,6 +406,7 @@ impl SAS {
     }
 
     pub fn verify_attestation(env: Env, uid: UID) -> bool {
+        extend_instance_ttl(&env);
         if let Some(attestation) = env.storage().persistent().get::<_, Attestation>(&uid) {
             env.storage()
                 .persistent()

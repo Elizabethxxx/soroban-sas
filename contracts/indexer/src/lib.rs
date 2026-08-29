@@ -1,6 +1,6 @@
 #![allow(unexpected_cfgs)]
 #![no_std]
-use soroban_sas_common::{SASError, LEDGERS_IN_ONE_YEAR, UID};
+use soroban_sas_common::{extend_instance_ttl, SASError, LEDGERS_IN_ONE_YEAR, UID};
 use soroban_sdk::{contract, contractimpl, panic_with_error, symbol_short, Address, Env, Symbol};
 
 // v1.0.0 Indexer logic frozen
@@ -101,6 +101,7 @@ impl Indexer {
         }
         env.storage().instance().set(&INDEXER_ADMIN, &admin);
         env.storage().instance().set(&SAS_CONTRACT, &sas);
+        extend_instance_ttl(&env);
     }
 
     /// Returns the admin address recorded by `init`, if the indexer has been
@@ -125,9 +126,11 @@ impl Indexer {
         index_address_uid(&env, &recipient, &uid, RECIPIENT_TOTAL);
         index_uid_uid(&env, &schema_uid, &uid, SCHEMA_TOTAL);
         index_address_uid(&env, &attester, &uid, ATTESTER_TOTAL);
+        extend_instance_ttl(&env);
     }
 
     pub fn get_attestations_by_recipient(env: Env, recipient: Address) -> soroban_sdk::Vec<UID> {
+        extend_instance_ttl(&env);
         let chunk_index = 0u32;
         env.storage()
             .persistent()
@@ -136,6 +139,7 @@ impl Indexer {
     }
 
     pub fn get_attestations_by_schema(env: Env, schema_uid: UID) -> soroban_sdk::Vec<UID> {
+        extend_instance_ttl(&env);
         let chunk_index = 0u32;
         env.storage()
             .persistent()
@@ -144,6 +148,7 @@ impl Indexer {
     }
 
     pub fn get_attestations_by_attester(env: Env, attester: Address) -> soroban_sdk::Vec<UID> {
+        extend_instance_ttl(&env);
         let chunk_index = 0u32;
         env.storage()
             .persistent()
@@ -157,6 +162,7 @@ impl Indexer {
         cursor: u32,
         limit: u32,
     ) -> soroban_sdk::Vec<UID> {
+        extend_instance_ttl(&env);
         if limit == 0 {
             return soroban_sdk::Vec::new(&env);
         }
