@@ -15,7 +15,7 @@ pub use signature::*;
 pub use typed_data::*;
 pub use validation::*;
 
-use soroban_sdk::{contracttype, Address, Bytes, String};
+use soroban_sdk::{contracttype, Address, Bytes, BytesN, String};
 
 /// Approximate number of ledgers in one year at five seconds per ledger.
 pub const LEDGERS_IN_ONE_YEAR: u32 = 6_307_200;
@@ -23,6 +23,22 @@ pub const LEDGERS_IN_ONE_YEAR: u32 = 6_307_200;
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UID(pub soroban_sdk::BytesN<32>);
+
+/// A delegated-verification key registered for an attester via
+/// `SAS::register_attester_key`/`rotate_attester_key`/`revoke_attester_key`.
+///
+/// `version` starts at `1` on first registration and increases by one on
+/// every rotation or post-revocation re-registration, so consumers can
+/// order key changes for the same attester. A `revoked` record is kept
+/// (not deleted) so a stale signature made under it fails closed rather
+/// than falling through to "no record found".
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttesterKeyRecord {
+    pub public_key: BytesN<32>,
+    pub version: u32,
+    pub revoked: bool,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
