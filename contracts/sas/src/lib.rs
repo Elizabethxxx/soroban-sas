@@ -43,7 +43,9 @@ impl SAS {
     pub fn set_indexer(env: Env, indexer: Address) {
         let admin: Address = env.storage().instance().get(&SAS_ADMIN).unwrap();
         admin.require_auth();
+        let old_indexer: Option<Address> = env.storage().instance().get(&INDEXER);
         env.storage().instance().set(&INDEXER, &indexer);
+        events::publish_indexer_updated(&env, old_indexer, indexer, admin);
     }
 
     pub fn attest(env: Env, attestation: Attestation) -> UID {

@@ -1,8 +1,8 @@
 use soroban_sas_common::{
-    events::{ATTESTED, REVOKED},
-    Attestation, AttestationIssuedEvent, AttestationRevokedEvent, UID,
+    events::{ATTESTED, INDEXER_UPDATED, REVOKED},
+    Attestation, AttestationIssuedEvent, AttestationRevokedEvent, IndexerUpdatedEvent, UID,
 };
-use soroban_sdk::Env;
+use soroban_sdk::{Address, Env};
 
 /// Publishes the `AttestationIssued` event.
 ///
@@ -34,6 +34,27 @@ pub fn publish_revoked(env: &Env, uid: &UID, timestamp: u64) {
         AttestationRevokedEvent {
             uid: uid.clone(),
             timestamp,
+        },
+    );
+}
+
+/// Publishes the `IndexerUpdated` event.
+///
+/// Topics: `(INDEXER_UPDATED, authorizer)`. Called only after
+/// `set_indexer` has already written the new binding to instance storage,
+/// so a failed or unauthorized call never emits this event.
+pub fn publish_indexer_updated(
+    env: &Env,
+    old_indexer: Option<Address>,
+    new_indexer: Address,
+    authorizer: Address,
+) {
+    env.events().publish(
+        (INDEXER_UPDATED, authorizer.clone()),
+        IndexerUpdatedEvent {
+            old_indexer,
+            new_indexer,
+            authorizer,
         },
     );
 }
