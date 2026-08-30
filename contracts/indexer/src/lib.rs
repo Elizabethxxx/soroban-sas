@@ -1,7 +1,9 @@
 #![allow(unexpected_cfgs)]
 #![no_std]
 use soroban_sas_common::{SASError, LEDGERS_IN_ONE_YEAR, UID};
-use soroban_sdk::{contract, contractimpl, panic_with_error, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Symbol,
+};
 
 // v1.0.0 Indexer logic frozen
 
@@ -82,6 +84,59 @@ fn index_uid_uid(env: &Env, key: &UID, uid: &UID, total_key: Symbol) {
     total += 1;
     env.storage().instance().set(&count_key, &total);
     extend_instance_ttl(env);
+}
+
+fn set_index_status(env: &Env, uid: &UID, status: IndexStatus) {
+    let key = (STATUS_KEY, uid.clone());
+    env.storage().persistent().set(&key, &status);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGERS_IN_ONE_YEAR, LEDGERS_IN_ONE_YEAR);
+}
+
+fn is_active(env: &Env, uid: &UID) -> bool {
+    // No status entry means legacy `Active` (issued before status tracking).
+    match env
+        .storage()
+        .persistent()
+        .get::<_, IndexStatus>(&(STATUS_KEY, uid.clone()))
+    {
+        Some(IndexStatus::Active) | None => true,
+        _ => false,
+    }
+}
+
+fn collect_filtered(
+    env: &Env,
+    total: u32,
+    mut get_chunk: impl FnMut(u32) -> Option<soroban_sdk::Vec<UID>>,
+    include_revoked: bool,
+) -> soroban_sdk::Vec<UID> {
+    let mut out = soroban_sdk::Vec::new(env);
+    let mut index = 0u32;
+    while index < total {
+        let chunk_index = index / MAX_CHUNK_SIZE;
+        let chunk_offset = index % MAX_CHUNK_SIZE;
+        let Some(chunk) = get_chunk(chunk_index) else {
+            break;
+        };
+        if chunk_offset >= chunk.len() {
+            index = (chunk_index + 1) * MAX_CHUNK_SIZE;
+            continue;
+        }
+        let available = chunk.len() - chunk_offset;
+        let remaining = total - index;
+        let take = core::cmp::min(available, remaining);
+        for offset in 0..take {
+            if let Some(uid) = chunk.get(chunk_offset + offset) {
+                if include_revoked || is_active(env, &uid) {
+                    out.push_back(uid);
+                }
+            }
+        }
+        index += take;
+    }
+    out
 }
 
 #[contractimpl]
@@ -220,6 +275,117 @@ impl Indexer {
         }
 
         uids
+    }
+
+    /// Filtered variants: `include_revoked == true` returns the full
+    /// auditable history (active + revoked + replaced); `false` returns
+    /// only `Active` UIDs. Replacement UIDs remain `Active`; their
+    /// predecessors become `Replaced` and are filtered out in active-only
+    /// mode but still appear in historical mode via the forward/reverse
+    /// links (`get_replacement` / `get_replaces`).
+
+    pub fn get_recipient_filtered(
+        env: Env,
+        recipient: Address,
+        include_revoked: bool,
+    ) -> soroban_sdk::Vec<UID> {
+        let total: u32 = env
+            .storage()
+            .instance()
+            .get(&(RECIPIENT_TOTAL, recipient.clone()))
+            .unwrap_or(0);
+        collect_filtered(&env, total, |chunk_index| {
+            env.storage()
+                .persistent()
+                .get(&(recipient.clone(), chunk_index))
+        }, include_revoked)
+    }
+
+    pub fn get_schema_filtered(
+        env: Env,
+        schema_uid: UID,
+        include_revoked: bool,
+    ) -> soroban_sdk::Vec<UID> {
+        let total: u32 = env
+            .storage()
+            .instance()
+            .get(&(SCHEMA_TOTAL, schema_uid.clone()))
+            .unwrap_or(0);
+        collect_filtered(&env, total, |chunk_index| {
+            env.storage()
+                .persistent()
+                .get(&(schema_uid.clone(), chunk_index))
+        }, include_revoked)
+    }
+
+    pub fn get_attester_filtered(
+        env: Env,
+        attester: Address,
+        include_revoked: bool,
+    ) -> soroban_sdk::Vec<UID> {
+        let total: u32 = env
+            .storage()
+            .instance()
+            .get(&(ATTESTER_TOTAL, attester.clone()))
+            .unwrap_or(0);
+        collect_filtered(&env, total, |chunk_index| {
+            env.storage()
+                .persistent()
+                .get(&(attester.clone(), chunk_index))
+        }, include_revoked)
+    }
+
+    /// Paginated active-only view: walks the underlying chunks and
+    /// skips revoked/replaced UIDs until `limit` active entries are
+    /// collected or the total is exhausted. `cursor` is a raw offset
+    /// into the historical index (so callers can resume with
+    /// `cursor + returned.len()` only when also advancing over skipped
+    /// entries, or use `cursor + limit` for historical pagination).
+    pub fn get_recipient_paginated_filtered(
+        env: Env,
+        recipient: Address,
+        cursor: u32,
+        limit: u32,
+        include_revoked: bool,
+    ) -> soroban_sdk::Vec<UID> {
+        if limit == 0 {
+            return soroban_sdk::Vec::new(&env);
+        }
+        let total: u32 = env
+            .storage()
+            .instance()
+            .get(&(RECIPIENT_TOTAL, recipient.clone()))
+            .unwrap_or(0);
+        if cursor >= total {
+            return soroban_sdk::Vec::new(&env);
+        }
+        let mut out = soroban_sdk::Vec::new(&env);
+        let mut index = cursor;
+        while index < total && out.len() < limit {
+            let chunk_index = index / MAX_CHUNK_SIZE;
+            let chunk_offset = index % MAX_CHUNK_SIZE;
+            let Some(chunk): Option<soroban_sdk::Vec<UID>> = env
+                .storage()
+                .persistent()
+                .get(&(recipient.clone(), chunk_index))
+            else {
+                break;
+            };
+            if chunk_offset >= chunk.len() {
+                index = (chunk_index + 1) * MAX_CHUNK_SIZE;
+                continue;
+            }
+            if let Some(uid) = chunk.get(chunk_offset) {
+                if include_revoked || is_active(&env, &uid) {
+                    out.push_back(uid);
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+            }
+            index += 1;
+        }
+        out
     }
 }
 
