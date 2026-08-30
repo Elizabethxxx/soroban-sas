@@ -124,8 +124,15 @@ impl SchemaRegistry {
         // carries a caller identity that off-chain indexers can trust.
         owner.require_auth();
 
+        // Canonical schema identity includes the schema string, resolver
+        // address, and revocability flag. Including all policy-defining fields
+        // in the UID preimage ensures two registrations with identical field
+        // definitions but different resolver or revocability policies do not
+        // collide. See specs/protocol-v1.md#schema-identity.
         let mut payload = Bytes::new(&env);
         payload.append(&schema.clone().to_xdr(&env));
+        payload.append(&resolver.clone().to_xdr(&env));
+        payload.append(&Bytes::from_slice(&env, &[revocable as u8]));
 
         let hash = env.crypto().sha256(&payload);
         let uid = UID(hash);
