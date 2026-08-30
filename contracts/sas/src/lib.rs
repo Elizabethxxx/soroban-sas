@@ -143,12 +143,27 @@ impl SAS {
             panic_with_error!(&env, SASError::InvalidSchema);
         };
 
-        // Optional resolver callback support
-        let _ = env.try_invoke_contract::<(), soroban_sdk::Error>(
-            &schema.resolver,
-            &Symbol::new(&env, "on_attest"),
-            soroban_sdk::vec![&env, attestation.clone().into_val(&env)],
-        );
+        // Resolver callback: authoritative. A resolver is optional in the
+        // sense that a schema need not name a "real" enforcement contract,
+        // but once named, its `on_attest` verdict controls whether the
+        // attestation is issued. Explicit rejection, a trap, and a resolver
+        // that doesn't implement `on_attest` all abort this call the same
+        // way (the host does not let a caller tell trap and missing-method
+        // apart) — see docs/schemas.md's "Resolver Failure Semantics". A
+        // panic reverts the whole transaction, including any event this
+        // call would otherwise have published, so the typed error is the
+        // only (and sufficient) observable signal here — there is no
+        // partial-effect window to additionally report on.
+        if env
+            .try_invoke_contract::<(), soroban_sdk::Error>(
+                &schema.resolver,
+                &Symbol::new(&env, "on_attest"),
+                soroban_sdk::vec![&env, attestation.clone().into_val(&env)],
+            )
+            .is_err()
+        {
+            panic_with_error!(&env, SASError::ResolverRejected);
+        }
 
         // Store the attestation
         env.storage()

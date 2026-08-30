@@ -36,4 +36,8 @@ pub enum SASError {
     IncompatibleDependency = 404,
     /// The requested attestation batch exceeds the protocol limit.
     BatchTooLarge = 405,
+    /// The schema's resolver rejected, trapped on, or does not implement the
+    /// callback for this operation. Resolvers are authoritative: this aborts
+    /// the whole call. See docs/schemas.md's "Resolver Failure Semantics".
+    ResolverRejected = 406,
 }
