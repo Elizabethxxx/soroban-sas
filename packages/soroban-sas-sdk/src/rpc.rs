@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::errors::SdkError;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use soroban_sdk::xdr::{Limits, ReadXdr, TransactionEnvelope};
 use ureq::{Agent, AgentBuilder};
 
 /// Per-request timeout applied by [`RpcClient`] unless overridden via
@@ -412,7 +413,246 @@ pub struct LedgerEntryResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::time::Instant;
+
+    /// A canned HTTP response for [`serve_once`] to write back to the first
+    /// connection it accepts.
+    struct FixtureResponse {
+        status_line: &'static str,
+        body: String,
+    }
+
+    impl FixtureResponse {
+        fn new(status_line: &'static str, body: impl Into<String>) -> Self {
+            Self {
+                status_line,
+                body: body.into(),
+            }
+        }
+    }
+
+    /// Starts a minimal one-shot HTTP server on a free localhost port: it
+    /// accepts a single connection, discards the request, writes back
+    /// `response`, and shuts down. Returns the `http://127.0.0.1:<port>/`
+    /// URL to point [`RpcClient`] at.
+    ///
+    /// The workspace has no HTTP-mocking dependency (`mockito`, `wiremock`,
+    /// ...), so this follows the same hand-rolled `TcpListener` convention
+    /// already used by `hung_node_is_cut_off_by_the_configured_timeout`,
+    /// extended to actually write a crafted status/body back.
+    fn serve_once(response: FixtureResponse) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            // Drain (a bounded amount of) the request so the client isn't
+            // left waiting on a full-duplex write; we don't need its
+            // contents for any of these fixtures.
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+
+            let http = format!(
+                "HTTP/1.1 {}\r\n\
+                 Content-Type: application/json\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\r\n{}",
+                response.status_line,
+                response.body.len(),
+                response.body
+            );
+            let _ = stream.write_all(http.as_bytes());
+            let _ = stream.flush();
+        });
+
+        url
+    }
+
+    /// Starts a listener that accepts a connection and immediately closes it
+    /// without writing any bytes, simulating a server that drops the
+    /// connection mid-request (e.g. a reset proxy or crashed node).
+    fn serve_connection_reset() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                drop(stream);
+            }
+        });
+
+        url
+    }
+
+    /// Table-driven matrix proving how every class of RPC failure — raw
+    /// transport failures, non-2xx HTTP statuses, malformed bodies, and
+    /// well-formed JSON-RPC error objects — maps into [`SdkError`]. Each
+    /// case is checked with `matches!` (no hand-written `match`/`panic!`
+    /// branches) plus assertions on whatever context that variant retains.
+    #[test]
+    fn rpc_failure_response_matrix() {
+        enum Expect {
+            Transport,
+            Rpc,
+        }
+
+        struct Case {
+            name: &'static str,
+            url: String,
+            expect: Expect,
+            /// Extra assertion on the retained error context/message.
+            check: fn(&SdkError),
+        }
+
+        let cases = vec![
+            Case {
+                name: "connection refused",
+                url: "http://127.0.0.1:1".to_string(),
+                expect: Expect::Transport,
+                check: |_| {},
+            },
+            Case {
+                name: "connection reset mid-request",
+                url: serve_connection_reset(),
+                expect: Expect::Transport,
+                check: |_| {},
+            },
+            Case {
+                name: "429 too many requests",
+                url: serve_once(FixtureResponse::new(
+                    "429 Too Many Requests",
+                    r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"rate limited"}}"#,
+                )),
+                // ureq treats every non-2xx status as `Error::Status`, mapped
+                // by `RpcClient::post` to `TransportError` *before* the body
+                // is ever handed to the JSON-RPC parser — so a 429's
+                // JSON-RPC-shaped payload is not decoded as `RpcError`, only
+                // the status code survives in the message.
+                expect: Expect::Transport,
+                check: |err| {
+                    let SdkError::TransportError(msg) = err else {
+                        unreachable!("checked by matches! above")
+                    };
+                    assert!(
+                        msg.contains("429"),
+                        "expected the status code in the message, got: {msg}"
+                    );
+                },
+            },
+            Case {
+                name: "500 internal server error",
+                url: serve_once(FixtureResponse::new("500 Internal Server Error", "oops")),
+                expect: Expect::Transport,
+                check: |err| {
+                    let SdkError::TransportError(msg) = err else {
+                        unreachable!("checked by matches! above")
+                    };
+                    assert!(
+                        msg.contains("500"),
+                        "expected the status code in the message, got: {msg}"
+                    );
+                },
+            },
+            Case {
+                name: "503 service unavailable",
+                url: serve_once(FixtureResponse::new("503 Service Unavailable", "")),
+                expect: Expect::Transport,
+                check: |err| {
+                    let SdkError::TransportError(msg) = err else {
+                        unreachable!("checked by matches! above")
+                    };
+                    assert!(
+                        msg.contains("503"),
+                        "expected the status code in the message, got: {msg}"
+                    );
+                },
+            },
+            Case {
+                name: "malformed JSON body on an otherwise-200 response",
+                url: serve_once(FixtureResponse::new("200 OK", "not json at all")),
+                expect: Expect::Rpc,
+                check: |_| {},
+            },
+            Case {
+                name: "200 response whose body is valid JSON but not a JSON-RPC envelope",
+                url: serve_once(FixtureResponse::new("200 OK", r#"{"foo":"bar"}"#)),
+                expect: Expect::Rpc,
+                check: |_| {},
+            },
+            Case {
+                name: "well-formed JSON-RPC error object",
+                url: serve_once(FixtureResponse::new(
+                    "200 OK",
+                    r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Invalid params"}}"#,
+                )),
+                expect: Expect::Rpc,
+                check: |err| {
+                    let SdkError::RpcError(msg) = err else {
+                        unreachable!("checked by matches! above")
+                    };
+                    assert!(
+                        msg.contains("-32602") && msg.contains("Invalid params"),
+                        "expected the JSON-RPC code and message retained, got: {msg}"
+                    );
+                },
+            },
+        ];
+
+        for case in cases {
+            let client = RpcClient::new(case.url.as_str()).with_timeout(Duration::from_secs(5));
+            let err = client
+                .get_ledger_entries(vec!["AAAAAA==".to_string()])
+                .expect_err(&format!("case '{}': expected an Err", case.name));
+
+            match case.expect {
+                Expect::Transport => assert!(
+                    matches!(err, SdkError::TransportError(_)),
+                    "case '{}': expected SdkError::TransportError, got {err:?}",
+                    case.name
+                ),
+                Expect::Rpc => assert!(
+                    matches!(err, SdkError::RpcError(_)),
+                    "case '{}': expected SdkError::RpcError, got {err:?}",
+                    case.name
+                ),
+            }
+            (case.check)(&err);
+        }
+    }
+
+    /// The one failure mode `rpc_failure_response_matrix` can't drive through
+    /// `serve_once` (which must write a complete response to let `ureq`
+    /// parse it): a node that accepts the connection and then never
+    /// responds. Proves the configured timeout — not the OS or `ureq`
+    /// default — is what eventually surfaces `SdkError::TransportError`.
+    #[test]
+    fn hung_node_maps_to_transport_error_via_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => held.push(stream),
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let client = RpcClient::new(url.as_str()).with_timeout(Duration::from_millis(300));
+        let err = client
+            .get_ledger_entries(vec!["AAAAAA==".to_string()])
+            .unwrap_err();
+
+        assert!(
+            matches!(err, SdkError::TransportError(_)),
+            "expected SdkError::TransportError, got {err:?}"
+        );
+    }
 
     #[test]
     fn builds_send_transaction_request() {
@@ -496,12 +736,14 @@ mod tests {
         );
 
         let err = client.parse_get_transaction_response(&body).unwrap_err();
-        match err {
-            SdkError::DecodingError(msg) => {
-                assert!(msg.contains("unsupported transaction envelope variant: TxV0"));
-            }
-            other => panic!("expected DecodingError, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                &err,
+                SdkError::DecodingError(msg)
+                    if msg.contains("unsupported transaction envelope variant: TxV0")
+            ),
+            "expected DecodingError mentioning TxV0, got {err:?}"
+        );
     }
 
     #[test]
@@ -521,12 +763,14 @@ mod tests {
         );
 
         let err = client.parse_get_transaction_response(&body).unwrap_err();
-        match err {
-            SdkError::DecodingError(msg) => {
-                assert!(msg.contains("unsupported transaction envelope variant: TxFeeBump"));
-            }
-            other => panic!("expected DecodingError, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                &err,
+                SdkError::DecodingError(msg)
+                    if msg.contains("unsupported transaction envelope variant: TxFeeBump")
+            ),
+            "expected DecodingError mentioning TxFeeBump, got {err:?}"
+        );
     }
 
     #[test]
@@ -539,10 +783,10 @@ mod tests {
         }"#;
 
         let err = client.parse_send_transaction_response(body).unwrap_err();
-        match err {
-            SdkError::RpcError(msg) => assert!(msg.contains("Invalid params")),
-            other => panic!("expected RpcError, got {other:?}"),
-        }
+        assert!(
+            matches!(&err, SdkError::RpcError(msg) if msg.contains("Invalid params")),
+            "expected RpcError mentioning 'Invalid params', got {err:?}"
+        );
     }
 
     #[test]
