@@ -36,6 +36,14 @@ pub enum SASError {
     IncompatibleDependency = 404,
     /// The requested attestation batch exceeds the protocol limit.
     BatchTooLarge = 405,
+    /// `register_attester_key` was called while a non-revoked key is
+    /// already registered for the attester; use `rotate_attester_key`.
+    AttesterKeyAlreadyRegistered = 406,
+    /// A rotate/revoke operation was attempted with no registered key on
+    /// file for the attester.
+    AttesterKeyNotFound = 407,
+    /// The registered key for this attester has already been revoked.
+    AttesterKeyRevoked = 408,
     /// The schema's resolver rejected, trapped on, or does not implement the
     /// callback for this operation. Resolvers are authoritative: this aborts
     /// the whole call. See docs/schemas.md's "Resolver Failure Semantics".

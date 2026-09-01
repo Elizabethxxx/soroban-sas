@@ -704,19 +704,151 @@ impl SAS {
     /// attesters do not need to call this at all.
     ///
     /// Requires `attester.require_auth()`, so only the address owner can
-    /// bind a key to it.
+    /// bind a key to it. Fails with `SASError::AttesterKeyAlreadyRegistered`
+    /// if a non-revoked key is already on file — use `rotate_attester_key`
+    /// to replace it instead, so a key can never be silently overwritten.
+    /// Re-registering after a revocation is allowed and starts a new
+    /// version.
     pub fn register_attester_key(env: Env, attester: Address, public_key: soroban_sdk::BytesN<32>) {
         extend_instance_ttl(&env);
         attester.require_auth();
-        let key = (ATTESTER_KEY, attester);
-        env.storage().persistent().set(&key, &public_key);
+
+        let key = (ATTESTER_KEY, attester.clone());
+        let existing: Option<soroban_sas_common::AttesterKeyRecord> =
+            env.storage().persistent().get(&key);
+        if let Some(record) = &existing {
+            if !record.revoked {
+                panic_with_error!(&env, SASError::AttesterKeyAlreadyRegistered);
+            }
+        }
+
+        let version = existing.map(|record| record.version + 1).unwrap_or(1);
+        let record = soroban_sas_common::AttesterKeyRecord {
+            public_key: public_key.clone(),
+            version,
+            revoked: false,
+        };
+        env.storage().persistent().set(&key, &record);
         env.storage()
             .persistent()
             .extend_ttl(&key, LEDGERS_IN_ONE_YEAR, LEDGERS_IN_ONE_YEAR);
+
+        env.events().publish(
+            (
+                soroban_sas_common::events::ATTESTER_KEY_REGISTERED,
+                attester.clone(),
+            ),
+            soroban_sas_common::AttesterKeyRegisteredEvent {
+                attester,
+                public_key,
+                version,
+            },
+        );
     }
 
-    /// Returns true if `public_key` was explicitly registered for `attester`
-    /// via `register_attester_key`.
+    /// Replaces `attester`'s registered delegated-verification key with
+    /// `new_public_key`. Requires `attester.require_auth()`, so only the
+    /// address owner can rotate its own key. Fails with
+    /// `SASError::AttesterKeyNotFound` if no key was ever registered, and
+    /// with `SASError::AttesterKeyRevoked` if the current key was already
+    /// revoked — `register_attester_key` is used to re-register in that
+    /// case instead, so the version history stays explicit about the gap.
+    ///
+    /// Once rotated, the old key immediately stops validating new
+    /// delegated attestations or revocations: `require_attester_key` only
+    /// ever compares against the current record.
+    pub fn rotate_attester_key(env: Env, attester: Address, new_public_key: soroban_sdk::BytesN<32>) {
+        attester.require_auth();
+
+        let key = (ATTESTER_KEY, attester.clone());
+        let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<_, soroban_sas_common::AttesterKeyRecord>(&key)
+        else {
+            panic_with_error!(&env, SASError::AttesterKeyNotFound);
+        };
+        if record.revoked {
+            panic_with_error!(&env, SASError::AttesterKeyRevoked);
+        }
+
+        let new_version = record.version + 1;
+        let old_public_key = record.public_key;
+        let new_record = soroban_sas_common::AttesterKeyRecord {
+            public_key: new_public_key.clone(),
+            version: new_version,
+            revoked: false,
+        };
+        env.storage().persistent().set(&key, &new_record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGERS_IN_ONE_YEAR, LEDGERS_IN_ONE_YEAR);
+
+        env.events().publish(
+            (
+                soroban_sas_common::events::ATTESTER_KEY_ROTATED,
+                attester.clone(),
+            ),
+            soroban_sas_common::AttesterKeyRotatedEvent {
+                attester,
+                old_public_key,
+                new_public_key,
+                new_version,
+            },
+        );
+    }
+
+    /// Revokes `attester`'s currently registered delegated-verification
+    /// key. Requires `attester.require_auth()`, so only the address owner
+    /// can revoke its own key. Fails with `SASError::AttesterKeyNotFound`
+    /// if no key was ever registered, and with
+    /// `SASError::AttesterKeyRevoked` if it was already revoked.
+    ///
+    /// After revocation, the key no longer validates any delegated
+    /// operation — `attest_by_delegation`, `revoke_by_delegation`, and
+    /// `verify_offchain_attestation` all reject it via
+    /// `require_attester_key`. The record is retained rather than deleted
+    /// so a future `register_attester_key` call continues the version
+    /// sequence instead of restarting at `1`.
+    pub fn revoke_attester_key(env: Env, attester: Address) {
+        attester.require_auth();
+
+        let key = (ATTESTER_KEY, attester.clone());
+        let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<_, soroban_sas_common::AttesterKeyRecord>(&key)
+        else {
+            panic_with_error!(&env, SASError::AttesterKeyNotFound);
+        };
+        if record.revoked {
+            panic_with_error!(&env, SASError::AttesterKeyRevoked);
+        }
+
+        let revoked_record = soroban_sas_common::AttesterKeyRecord {
+            revoked: true,
+            ..record.clone()
+        };
+        env.storage().persistent().set(&key, &revoked_record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGERS_IN_ONE_YEAR, LEDGERS_IN_ONE_YEAR);
+
+        env.events().publish(
+            (
+                soroban_sas_common::events::ATTESTER_KEY_REVOKED,
+                attester.clone(),
+            ),
+            soroban_sas_common::AttesterKeyRevokedEvent {
+                attester,
+                public_key: record.public_key,
+                version: record.version,
+            },
+        );
+    }
+
+    /// Returns true if `public_key` is `attester`'s current, non-revoked
+    /// registered key.
     fn registered_key_matches(
         env: &Env,
         attester: &Address,
@@ -724,8 +856,8 @@ impl SAS {
     ) -> bool {
         env.storage()
             .persistent()
-            .get::<_, soroban_sdk::BytesN<32>>(&(ATTESTER_KEY, attester.clone()))
-            .is_some_and(|registered| registered == *public_key)
+            .get::<_, soroban_sas_common::AttesterKeyRecord>(&(ATTESTER_KEY, attester.clone()))
+            .is_some_and(|record| !record.revoked && record.public_key == *public_key)
     }
 
     fn require_attester_key(env: &Env, attester: &Address, public_key: &soroban_sdk::BytesN<32>) {
