@@ -11,16 +11,18 @@
 #   3. indexer                               (needs sas address)
 #        └─ Indexer::init(admin, sas)
 #
-# On success the contract IDs, network settings and the admin key are merged
-# into .env using the exact key names from .env.example:
+# On success the contract IDs, network settings and the admin public address
+# are merged into .env using the exact key names from .env.example:
 #
 #   SOROBAN_RPC_URL, SOROBAN_NETWORK_PASSPHRASE,
 #   SAS_CONTRACT_ID, SCHEMA_REGISTRY_CONTRACT_ID, INDEXER_CONTRACT_ID,
-#   ADMIN_SECRET_KEY
+#   ADMIN_PUBLIC_ADDRESS
 #
 # Usage:
 #   ./scripts/deploy.sh [--network testnet|mainnet] [--secret-key S...] \
 #                       [--rpc-url URL] [--env-file FILE] [--skip-build] [--json]
+#                       [--rpc-url URL] [--env-file FILE] [--skip-build] \
+#                       [--export-secret]
 #
 # Flags:
 #   --network <testnet|mainnet>  Target network (default: testnet).
@@ -37,6 +39,10 @@
 #                                to stderr, so `--json` output stays parseable
 #                                even when piped, e.g.:
 #                                  ./scripts/deploy.sh --json > deployment.json
+#   --export-secret              Opt-in: write ADMIN_SECRET_KEY to .env.
+#                                By default only the admin public address is
+#                                stored; use this flag when plaintext export
+#                                is required for local development.
 #   -h, --help                   Show this help.
 #
 # A child process cannot export variables into the shell that launched it, so
@@ -71,6 +77,7 @@ RPC_URL_OVERRIDE=""
 ENV_FILE=".env"
 SKIP_BUILD=false
 JSON_OUTPUT=false
+EXPORT_SECRET=false
 
 TESTNET_RPC_URL="https://soroban-testnet.stellar.org:443"
 TESTNET_PASSPHRASE="Test SDF Network ; September 2015"
@@ -90,6 +97,14 @@ while [[ $# -gt 0 ]]; do
         --json)       JSON_OUTPUT=true; shift ;;
         -h|--help)    usage; exit 0 ;;
         *)            die "unknown argument: $1 (see --help)" ;;
+        --network)        NETWORK="${2:?--network requires a value}"; shift 2 ;;
+        --secret-key)     SECRET_KEY="${2:?--secret-key requires a value}"; shift 2 ;;
+        --rpc-url)        RPC_URL_OVERRIDE="${2:?--rpc-url requires a value}"; shift 2 ;;
+        --env-file)       ENV_FILE="${2:?--env-file requires a value}"; shift 2 ;;
+        --skip-build)     SKIP_BUILD=true; shift ;;
+        --export-secret)  EXPORT_SECRET=true; shift ;;
+        -h|--help)        usage; exit 0 ;;
+        *)                die "unknown argument: $1 (see --help)" ;;
     esac
 done
 
@@ -251,6 +266,18 @@ invoke "$INDEXER_ID" init --admin "$ADMIN_ADDRESS" --sas "$SAS_ID" ||
     die "Indexer::init failed — indexer deployed at $INDEXER_ID but is NOT initialized"
 info "Indexer initialized with sas $SAS_ID"
 
+step "Binding SAS to the deployed indexer"
+invoke "$SAS_ID" set_indexer --indexer "$INDEXER_ID" ||
+    die "SAS::set_indexer failed — indexer was initialized but SAS was not bound"
+
+step "Verifying the SAS <-> Indexer binding"
+SAS_BOUND="$(invoke "$SAS_ID" get_indexer)"
+INDEXER_BOUND="$(invoke "$INDEXER_ID" get_sas)"
+if [[ "$SAS_BOUND" != "$INDEXER_ID" || "$INDEXER_BOUND" != "$SAS_ID" ]]; then
+    die "binding verification failed: SAS.get_indexer=$SAS_BOUND, Indexer.get_sas=$INDEXER_BOUND. Re-run with the same admin key, then call 'stellar contract invoke --id $SAS_ID -- set_indexer --indexer $INDEXER_ID' and verify with 'stellar contract invoke --id $INDEXER_ID -- get_sas'"
+fi
+info "SAS and Indexer are bidirectionally bound"
+
 # ---------------------------------------------------------------------------
 # Write .env — merge into any existing file without clobbering unrelated
 # variables. Managed keys use the exact names from .env.example.
@@ -320,6 +347,24 @@ chmod 600 "$ENV_WORK" 2>/dev/null || true
 mv "$ENV_WORK" "$ENV_FILE"
 
 ENV_FILE_ABS="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+upsert_env "SOROBAN_RPC_URL"             "$RPC_URL"    true
+upsert_env "SOROBAN_NETWORK_PASSPHRASE"  "$PASSPHRASE" true
+upsert_env "SCHEMA_REGISTRY_CONTRACT_ID" "$REGISTRY_ID"
+upsert_env "SAS_CONTRACT_ID"             "$SAS_ID"
+upsert_env "INDEXER_CONTRACT_ID"         "$INDEXER_ID"
+upsert_env "ADMIN_PUBLIC_ADDRESS"        "$ADMIN_ADDRESS"
+
+if [[ "$EXPORT_SECRET" == true ]]; then
+    upsert_env "ADMIN_SECRET_KEY"        "$SECRET_KEY"
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+    warn "ADMIN_SECRET_KEY written to $ENV_FILE (chmod 600)"
+else
+    # Remove any stale ADMIN_SECRET_KEY from a previous run.
+    if [[ -f "$ENV_FILE" ]] && grep -q "^ADMIN_SECRET_KEY=" "$ENV_FILE"; then
+        sed -i '/^ADMIN_SECRET_KEY=/d' "$ENV_FILE"
+        warn "removed ADMIN_SECRET_KEY from $ENV_FILE (use --export-secret to keep it)"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Summary — human-readable report on stdout, or a single JSON object on
@@ -358,5 +403,20 @@ info ""
 info "    source $ENV_FILE"
 info ""
 info "next step: use soroban-sas-cli against these contracts,"
+step "Deployment complete on $NETWORK"
+printf '\n'
+printf '  %-16s %s\n' "schema-registry:" "$REGISTRY_ID"
+printf '  %-16s %s\n' "sas:" "$SAS_ID"
+printf '  %-16s %s\n' "indexer:" "$INDEXER_ID"
+printf '  %-16s %s\n' "admin:" "$ADMIN_ADDRESS"
+printf '  %-16s %s\n' "network:" "$NETWORK ($RPC_URL)"
+printf '\n'
+info "results written to $ENV_FILE (key names match .env.example)"
+if [[ "$EXPORT_SECRET" == true ]]; then
+    info "ADMIN_SECRET_KEY is in $ENV_FILE — guard this file carefully"
+else
+    info "signing uses the '$IDENTITY_NAME' CLI identity (no secret key stored in .env)"
+fi
+info "next step: source $ENV_FILE and use soroban-sas-cli against these contracts,"
 info "e.g.: cargo run -p soroban-sas-cli -- schema register ..."
 
