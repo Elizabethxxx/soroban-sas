@@ -40,4 +40,12 @@ pub enum SASError {
     /// callback for this operation. Resolvers are authoritative: this aborts
     /// the whole call. See docs/schemas.md's "Resolver Failure Semantics".
     ResolverRejected = 406,
+    /// `attest_with_value` was called with a token or amount that does not
+    /// match the fee required by authenticated on-chain configuration (#164).
+    FeeMismatch = 406,
+    /// A bound Indexer could not be invoked and the contract is configured to
+    /// fail closed on indexing errors (#161).
+    IndexerUnavailable = 407,
+    /// The count metadata expired while schema records still exist.
+    CountMetadataExpired = 408,
 }
