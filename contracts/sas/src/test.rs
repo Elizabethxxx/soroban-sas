@@ -2,7 +2,7 @@ use crate::{SASClient, SAS};
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sas_common::{
     hash_delegated_revocation, Attestation, AttestationDomain, AttestationIssuedEvent,
-    AttestationRevokedEvent, SASError, UID,
+    AttestationRevokedEvent, IndexerUpdatedEvent, SASError, UID,
 };
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
@@ -1532,6 +1532,7 @@ fn test_revoke_emits_attestation_revoked_event() {
 }
 
 #[test]
+fn test_set_indexer_emits_event_with_old_and_new_value() {
 fn test_delegation_nonce_survives_one_year_ttl_and_rejects_replay() {
     // Validates durable nonce: per-attester strictly increasing instance storage
     // must reject replay even after ledger advancement beyond the previous
@@ -1711,6 +1712,51 @@ fn fee_test_env() -> (Env, SASClient<'static>, Address, Address, Address, Addres
     let registry_id = env.register_contract(None, mock1::MockRegistry);
     let sas_id = env.register_contract(None, SAS);
     let sas_client = SASClient::new(&env, &sas_id);
+
+    let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+
+    let indexer_one = Address::generate(&env);
+    let indexer_two = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    sas_client.set_indexer(&indexer_one);
+    let expected_first = IndexerUpdatedEvent {
+        old_indexer: None,
+        new_indexer: indexer_one.clone(),
+        authorizer: admin.clone(),
+    };
+    let events = env.events().all();
+    assert_eq!(
+        events.slice(events.len() - 1..),
+        soroban_sdk::vec![
+            &env,
+            (
+                sas_id.clone(),
+                (symbol_short!("IDXUPD"), admin.clone()).into_val(&env),
+                expected_first.into_val(&env),
+            )
+        ]
+    );
+
+    sas_client.set_indexer(&indexer_two);
+    let expected_second = IndexerUpdatedEvent {
+        old_indexer: Some(indexer_one),
+        new_indexer: indexer_two,
+        authorizer: admin.clone(),
+    };
+    let events = env.events().all();
+    assert_eq!(
+        events.slice(events.len() - 1..),
+        soroban_sdk::vec![
+            &env,
+            (
+                sas_id,
+                (symbol_short!("IDXUPD"), admin).into_val(&env),
+                expected_second.into_val(&env),
+            )
+        ]
     let admin = Address::generate(&env);
     env.mock_all_auths();
     sas_client.init(&admin, &registry_id);
@@ -1755,6 +1801,7 @@ fn test_attest_with_value_rejects_wrong_token_and_short_amount() {
 }
 
 #[test]
+fn test_set_indexer_requires_admin_auth() {
 fn test_attest_with_value_accepts_exact_configured_fee() {
     let (env, sas_client, sas_id, admin, attester, recipient) = fee_test_env();
     let fee_token = env.register_stellar_asset_contract(admin.clone());
@@ -1923,6 +1970,11 @@ fn test_delegated_attest_normalizes_time_to_ledger_timestamp() {
     let sas_client = SASClient::new(&env, &sas_id);
 
     let admin = Address::generate(&env);
+    sas_client.init(&admin, &registry_id);
+
+    let indexer = Address::generate(&env);
+    let res = sas_client.try_set_indexer(&indexer);
+    assert!(res.is_err());
     env.mock_all_auths();
     sas_client.init(&admin, &registry_id);
 

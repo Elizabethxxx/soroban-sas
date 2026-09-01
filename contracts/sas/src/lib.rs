@@ -120,7 +120,9 @@ impl SAS {
         extend_instance_ttl(&env);
         let admin = require_admin(&env);
         admin.require_auth();
+        let old_indexer: Option<Address> = env.storage().instance().get(&INDEXER);
         env.storage().instance().set(&INDEXER, &indexer);
+        events::publish_indexer_updated(&env, old_indexer, indexer, admin);
         extend_instance_ttl(&env);
     }
 
