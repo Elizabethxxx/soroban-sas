@@ -51,6 +51,15 @@ pub fn extend_instance_ttl(env: &Env) {
         .instance()
         .extend_ttl(INSTANCE_TTL_THRESHOLD_LEDGERS, INSTANCE_EXTEND_TO_LEDGERS);
 }
+/// Maximum byte length of `Attestation.data` accepted on-chain.
+///
+/// Large payloads increase hashing, XDR encoding, event emission, storage,
+/// and cross-contract invocation costs. A bounded ceiling keeps these within
+/// the measured Soroban budget envelope and prevents unpredictable budget
+/// exhaustion or ledger-entry size violations. The value is chosen to be
+/// well within Soroban limits while accommodating typical attestation
+/// payloads. (#157)
+pub const MAX_ATTESTATION_DATA_BYTES: u32 = 10_000;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
