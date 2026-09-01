@@ -250,6 +250,18 @@ impl Indexer {
         env.storage().instance().get(&SAS_CONTRACT)
     }
 
+    /// Records an attestation's UID against its recipient, schema, and
+    /// attester lookup tables.
+    ///
+    /// Trust boundary: only the SAS contract bound at `init` may call this.
+    /// It requires `sas.require_auth()`, which Soroban satisfies without an
+    /// explicit signature when the invocation originates from that
+    /// contract's own execution context (i.e. `SAS::attest_internal`
+    /// invoking this entry point directly) — an arbitrary external account
+    /// or contract cannot produce that authorization. Panics with
+    /// `SASError::AlreadyInitialized`'s sibling, `Unauthorized`, if the
+    /// indexer has not been initialized yet, since there is no trusted SAS
+    /// address to authorize against.
     /// Records `uid` in the recipient, schema, and attester indexes.
     ///
     /// Idempotent: a repeated call with the **same**
@@ -265,6 +277,10 @@ impl Indexer {
         schema_uid: UID,
         attester: Address,
     ) {
+        let Some(sas): Option<Address> = env.storage().instance().get(&SAS_CONTRACT) else {
+            panic_with_error!(&env, SASError::Unauthorized);
+        };
+        sas.require_auth();
         extend_instance_ttl(&env);
 
         let record: IndexRecord = (recipient.clone(), schema_uid.clone(), attester.clone());

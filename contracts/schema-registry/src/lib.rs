@@ -4,9 +4,12 @@
 
 use soroban_sas_common::{
     extend_instance_ttl, validate_schema_syntax, SASError, SchemaRecord, LEDGERS_IN_ONE_YEAR, UID,
+    events::{CONTRACT_UPGRADED, SCHEMA_FEE_UPDATED, TREASURY_UPDATED},
+    validate_schema_syntax, ContractUpgradedEvent, SASError, SchemaFeeUpdatedEvent, SchemaRecord,
+    TreasuryUpdatedEvent, LEDGERS_IN_ONE_YEAR, UID,
 };
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, xdr::ToXdr, Address, Bytes, Env, String,
+    contract, contractimpl, panic_with_error, xdr::ToXdr, Address, Bytes, BytesN, Env, String,
 };
 
 #[contract]
@@ -74,6 +77,18 @@ impl SchemaRegistry {
         env.storage().instance().get(&REGISTRY_VERSION).unwrap_or(1)
     }
 
+    /// Replaces this contract's installed WASM. Requires the registry
+    /// admin's authorization. Emits `ContractUpgraded` with the hash being
+    /// replaced and the new hash immediately before the swap takes effect,
+    /// so a failed or unauthorized call never emits the event: if the swap
+    /// itself then fails (e.g. `new_wasm_hash` has no uploaded WASM),
+    /// Soroban rolls back the whole invocation, discarding the event and
+    /// the storage write below along with it.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
+        admin.require_auth();
+
+        Self::record_upgrade_event(&env, &admin, new_wasm_hash.clone());
     /// Versioned upgrade. Validates the candidate before activation:
     ///  - `new_version` must be exactly `current + 1` (no skips/downgrades)
     ///  - only known versions (currently 2, i.e. next after genesis) are
@@ -133,20 +148,80 @@ impl SchemaRegistry {
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
+    /// Records the WASM-hash rotation and emits `ContractUpgraded`.
+    /// Factored out of `upgrade` so its event-payload logic (reading the
+    /// previously tracked hash, building the event) can be exercised in
+    /// tests without going through `update_current_contract_wasm`, which
+    /// requires a real, previously uploaded WASM blob to target.
+    fn record_upgrade_event(env: &Env, admin: &Address, new_wasm_hash: BytesN<32>) {
+        let old_wasm_hash: Option<BytesN<32>> = env.storage().instance().get(&CURRENT_WASM_HASH);
+        // Soroban does not expose a way to read the currently installed
+        // WASM hash from within the contract itself, so the first upgrade
+        // on a given deployment has no prior tracked hash to report; every
+        // upgrade after that carries the hash it is replacing.
+        let old_wasm_hash = old_wasm_hash.unwrap_or_else(|| new_wasm_hash.clone());
+
+        env.storage()
+            .instance()
+            .set(&CURRENT_WASM_HASH, &new_wasm_hash);
+
+        env.events().publish(
+            (CONTRACT_UPGRADED, admin.clone()),
+            ContractUpgradedEvent {
+                old_wasm_hash,
+                new_wasm_hash,
+                authorizer: admin.clone(),
+            },
+        );
+    }
+
+    /// Sets the fee charged for schema registration. Requires the registry
+    /// admin's authorization. Emits `SchemaFeeUpdated` with the previous
+    /// fee (`None` the first time a fee is set) after the new fee has
+    /// already been written to storage.
     pub fn set_fee(env: Env, fee: i128) {
+        let admin: Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
         extend_instance_ttl(&env);
         let admin = require_registry_admin(&env);
         admin.require_auth();
+
+        let old_fee: Option<i128> = env.storage().instance().get(&SCHEMA_FEE);
         env.storage().instance().set(&SCHEMA_FEE, &fee);
         extend_instance_ttl(&env);
+
+        env.events().publish(
+            (SCHEMA_FEE_UPDATED, admin.clone()),
+            SchemaFeeUpdatedEvent {
+                old_fee,
+                new_fee: fee,
+                authorizer: admin,
+            },
+        );
     }
 
+    /// Sets the treasury address that receives registration fees. Requires
+    /// the registry admin's authorization. Emits `TreasuryUpdated` with the
+    /// previous treasury (`None` the first time a treasury is set) after
+    /// the new address has already been written to storage.
+    pub fn set_treasury(env: Env, treasury: Address) {
+        let admin: Address = env.storage().instance().get(&REGISTRY_ADMIN).unwrap();
     pub fn set_treasury(env: Env, treasury: soroban_sdk::Address) {
         extend_instance_ttl(&env);
         let admin = require_registry_admin(&env);
         admin.require_auth();
+
+        let old_treasury: Option<Address> = env.storage().instance().get(&TREASURY);
         env.storage().instance().set(&TREASURY, &treasury);
         extend_instance_ttl(&env);
+
+        env.events().publish(
+            (TREASURY_UPDATED, admin.clone()),
+            TreasuryUpdatedEvent {
+                old_treasury,
+                new_treasury: treasury,
+                authorizer: admin,
+            },
+        );
     }
 
     pub fn withdraw_fees(env: Env, amount: i128) {
