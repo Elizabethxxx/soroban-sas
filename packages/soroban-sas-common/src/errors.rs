@@ -44,6 +44,10 @@ pub enum SASError {
     AttesterKeyNotFound = 407,
     /// The registered key for this attester has already been revoked.
     AttesterKeyRevoked = 408,
+    /// The schema's resolver rejected, trapped on, or does not implement the
+    /// callback for this operation. Resolvers are authoritative: this aborts
+    /// the whole call. See docs/schemas.md's "Resolver Failure Semantics".
+    ResolverRejected = 406,
     /// `attest_with_value` was called with a token or amount that does not
     /// match the fee required by authenticated on-chain configuration (#164).
     FeeMismatch = 406,
